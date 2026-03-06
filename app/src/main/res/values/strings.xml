@@ -1,0 +1,14 @@
+<resources>
+    <string name="app_name">Matrix Player</string>
+    <string name="no_tracks">No audio files found</string>
+    <string name="permission_required">Storage permission is required to load audio files</string>
+    <string name="tab_tracks">Tracks</string>
+    <string name="tab_albums">Albums</string>
+    <string name="tab_artists">Artists</string>
+    <string name="tab_folders">Folders</string>
+    <string name="btn_previous">Previous</string>
+    <string name="btn_next">Next</string>
+    <string name="btn_play">Play</string>
+    <string name="btn_pause">Pause</string>
+    <string name="btn_back">Back</string>
+</resources>
