@@ -4,6 +4,9 @@
     <string name="permission_required">Storage permission is required to load audio files</string>
     <string name="tab_tracks">Tracks</string>
     <string name="tab_albums">Albums</string>
+    <string name="tab_eps">EPs</string>
+    <string name="tab_singles">Singles</string>
+    <string name="tab_remixes">Remixes</string>
     <string name="tab_artists">Artists</string>
     <string name="tab_folders">Folders</string>
     <string name="btn_previous">Previous</string>

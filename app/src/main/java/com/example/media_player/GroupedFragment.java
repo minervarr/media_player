@@ -20,12 +20,21 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 public class GroupedFragment extends Fragment implements PlaybackObserver, TrackAdapter.OnTrackClickListener, CategoryAdapter.OnCategoryClickListener {
 
     public static final int MODE_ALBUM = 0;
     public static final int MODE_ARTIST = 1;
     public static final int MODE_FOLDER = 2;
+    public static final int MODE_EP = 3;
+    public static final int MODE_SINGLE = 4;
+    public static final int MODE_REMIX = 5;
+
+    private static final int RELEASE_ALBUM = 0;
+    private static final int RELEASE_EP = 1;
+    private static final int RELEASE_SINGLE = 2;
+    private static final int RELEASE_REMIX = 3;
 
     private static final String ARG_MODE = "mode";
 
@@ -92,7 +101,7 @@ public class GroupedFragment extends Fragment implements PlaybackObserver, Track
         tvEmpty = view.findViewById(R.id.tv_empty);
         View backHeader = view.findViewById(R.id.back_header);
 
-        if (mode == MODE_ALBUM) {
+        if (isAlbumLikeMode()) {
             viewType = CategoryAdapter.VIEW_TYPE_GRID;
             recyclerCategories.setLayoutManager(new GridLayoutManager(requireContext(), 3));
         } else {
@@ -147,10 +156,16 @@ public class GroupedFragment extends Fragment implements PlaybackObserver, Track
         return map;
     }
 
+    private boolean isAlbumLikeMode() {
+        return mode == MODE_ALBUM || mode == MODE_EP
+            || mode == MODE_SINGLE || mode == MODE_REMIX;
+    }
+
     private String getGroupKey(Track t) {
+        if (isAlbumLikeMode()) {
+            return String.valueOf(t.albumId);
+        }
         switch (mode) {
-            case MODE_ALBUM:
-                return String.valueOf(t.albumId);
             case MODE_ARTIST:
                 return t.artist != null && !t.artist.isEmpty() ? t.artist : "Unknown";
             case MODE_FOLDER:
@@ -172,10 +187,16 @@ public class GroupedFragment extends Fragment implements PlaybackObserver, Track
             String artworkKey;
             switch (mode) {
                 case MODE_ALBUM:
-                    title = first.album != null && !first.album.isEmpty() ? first.album : "Unknown";
+                case MODE_EP:
+                case MODE_SINGLE:
+                case MODE_REMIX:
+                    String albumName = first.album != null && !first.album.isEmpty() ? first.album : "Unknown";
+                    int releaseType = classifyRelease(albumName, tracks);
+                    int targetMode = releaseTypeToMode(releaseType);
+                    if (targetMode != mode) continue;
+                    title = albumName;
                     String artist = first.artist != null && !first.artist.isEmpty() ? first.artist : "Unknown";
-                    String releaseType = classifyRelease(tracks.size());
-                    subtitle = artist + " -- " + releaseType;
+                    subtitle = artist;
                     artworkKey = "album:" + key;
                     break;
                 case MODE_ARTIST:
@@ -200,20 +221,67 @@ public class GroupedFragment extends Fragment implements PlaybackObserver, Track
         categories.addAll(items);
     }
 
-    private String classifyRelease(int trackCount) {
-        if (trackCount <= 1) return "Single";
-        if (trackCount <= 4) return "EP";
-        return "Album";
+    private int classifyRelease(String albumName, List<Track> tracks) {
+        if (isRemixRelease(albumName, tracks)) return RELEASE_REMIX;
+        if (tracks.size() == 1) return RELEASE_SINGLE;
+        if (tracks.size() <= 4) return RELEASE_EP;
+        return RELEASE_ALBUM;
+    }
+
+    private int releaseTypeToMode(int releaseType) {
+        switch (releaseType) {
+            case RELEASE_EP: return MODE_EP;
+            case RELEASE_SINGLE: return MODE_SINGLE;
+            case RELEASE_REMIX: return MODE_REMIX;
+            default: return MODE_ALBUM;
+        }
+    }
+
+    private static boolean isRemixTrack(String title) {
+        if (title == null || title.isEmpty()) return false;
+        String lower = title.trim().toLowerCase();
+        if (lower.equals("remix") || lower.equals("mix")
+                || lower.equals("the remix") || lower.equals("the mix")) {
+            return false;
+        }
+        if (lower.contains("remix") || lower.contains("rmx")) {
+            return true;
+        }
+        if (Pattern.compile("\\b\\w+\\s+mix\\b", Pattern.CASE_INSENSITIVE).matcher(title).find()) {
+            return true;
+        }
+        if (Pattern.compile("\\(.*mix.*\\)", Pattern.CASE_INSENSITIVE).matcher(title).find()) {
+            return true;
+        }
+        if (Pattern.compile("\\[.*mix.*\\]", Pattern.CASE_INSENSITIVE).matcher(title).find()) {
+            return true;
+        }
+        return false;
+    }
+
+    private static boolean isRemixRelease(String albumName, List<Track> tracks) {
+        if (albumName != null) {
+            if (Pattern.compile("\\b(remix|remixes|remixed|rmx)\\b", Pattern.CASE_INSENSITIVE)
+                    .matcher(albumName).find()) {
+                return true;
+            }
+        }
+        int remixCount = 0;
+        for (Track t : tracks) {
+            if (isRemixTrack(t.title)) remixCount++;
+        }
+        return remixCount == tracks.size() || (remixCount >= 2 && remixCount * 2 > tracks.size());
     }
 
     private void sortTracksInGroup(List<Track> list) {
+        if (isAlbumLikeMode()) {
+            Collections.sort(list, (a, b) -> {
+                int cmp = Integer.compare(a.trackNumber, b.trackNumber);
+                return cmp != 0 ? cmp : a.title.compareToIgnoreCase(b.title);
+            });
+            return;
+        }
         switch (mode) {
-            case MODE_ALBUM:
-                Collections.sort(list, (a, b) -> {
-                    int cmp = Integer.compare(a.trackNumber, b.trackNumber);
-                    return cmp != 0 ? cmp : a.title.compareToIgnoreCase(b.title);
-                });
-                break;
             case MODE_ARTIST:
                 Collections.sort(list, (a, b) -> {
                     int cmp = a.album.compareToIgnoreCase(b.album);

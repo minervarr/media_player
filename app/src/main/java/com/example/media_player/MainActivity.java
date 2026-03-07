@@ -53,7 +53,7 @@ public class MainActivity extends AppCompatActivity implements TrackDataProvider
     private int currentQueueIndex = -1;
     private long playingTrackId = -1;
 
-    private final Fragment[] fragments = new Fragment[4];
+    private final Fragment[] fragments = new Fragment[7];
     private int currentTabIndex = 0;
 
     private AppSettings settings;
@@ -147,13 +147,19 @@ public class MainActivity extends AppCompatActivity implements TrackDataProvider
     private void setupTabs() {
         binding.tabLayout.addTab(binding.tabLayout.newTab().setText(R.string.tab_tracks));
         binding.tabLayout.addTab(binding.tabLayout.newTab().setText(R.string.tab_albums));
+        binding.tabLayout.addTab(binding.tabLayout.newTab().setText(R.string.tab_eps));
+        binding.tabLayout.addTab(binding.tabLayout.newTab().setText(R.string.tab_singles));
+        binding.tabLayout.addTab(binding.tabLayout.newTab().setText(R.string.tab_remixes));
         binding.tabLayout.addTab(binding.tabLayout.newTab().setText(R.string.tab_artists));
         binding.tabLayout.addTab(binding.tabLayout.newTab().setText(R.string.tab_folders));
 
         fragments[0] = new TracksFragment();
         fragments[1] = GroupedFragment.newInstance(GroupedFragment.MODE_ALBUM);
-        fragments[2] = GroupedFragment.newInstance(GroupedFragment.MODE_ARTIST);
-        fragments[3] = GroupedFragment.newInstance(GroupedFragment.MODE_FOLDER);
+        fragments[2] = GroupedFragment.newInstance(GroupedFragment.MODE_EP);
+        fragments[3] = GroupedFragment.newInstance(GroupedFragment.MODE_SINGLE);
+        fragments[4] = GroupedFragment.newInstance(GroupedFragment.MODE_REMIX);
+        fragments[5] = GroupedFragment.newInstance(GroupedFragment.MODE_ARTIST);
+        fragments[6] = GroupedFragment.newInstance(GroupedFragment.MODE_FOLDER);
 
         FragmentManager fm = getSupportFragmentManager();
         FragmentTransaction ft = fm.beginTransaction();
