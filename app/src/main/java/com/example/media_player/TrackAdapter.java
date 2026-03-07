@@ -3,6 +3,7 @@ package com.example.media_player;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.ImageView;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
@@ -66,9 +67,12 @@ public class TrackAdapter extends RecyclerView.Adapter<TrackAdapter.ViewHolder> 
 
         holder.tvDuration.setText(track.getFormattedDuration());
 
+        ArtworkCache.getInstance(holder.ivArtwork.getContext())
+                .loadArtwork("album:" + track.albumId, holder.ivArtwork, 120);
+
         holder.itemView.setOnClickListener(v -> {
             int pos = holder.getAdapterPosition();
-            if (pos != RecyclerView.NO_POSITION) {
+            if (pos != RecyclerView.NO_POSITION && pos < tracks.size()) {
                 listener.onTrackClick(tracks.get(pos));
             }
         });
@@ -80,6 +84,7 @@ public class TrackAdapter extends RecyclerView.Adapter<TrackAdapter.ViewHolder> 
     }
 
     static class ViewHolder extends RecyclerView.ViewHolder {
+        final ImageView ivArtwork;
         final TextView tvTrackNumber;
         final TextView tvTitle;
         final TextView tvArtist;
@@ -87,6 +92,7 @@ public class TrackAdapter extends RecyclerView.Adapter<TrackAdapter.ViewHolder> 
 
         ViewHolder(View itemView) {
             super(itemView);
+            ivArtwork = itemView.findViewById(R.id.iv_track_artwork);
             tvTrackNumber = itemView.findViewById(R.id.tv_track_number);
             tvTitle = itemView.findViewById(R.id.tv_title);
             tvArtist = itemView.findViewById(R.id.tv_artist);

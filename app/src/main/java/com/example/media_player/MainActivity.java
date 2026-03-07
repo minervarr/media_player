@@ -5,6 +5,7 @@ import android.content.ContentUris;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
+import android.graphics.Bitmap;
 import android.media.MediaPlayer;
 import android.net.Uri;
 import android.os.Build;
@@ -12,6 +13,8 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.MediaStore;
+import android.view.Menu;
+import android.view.MenuItem;
 import android.view.WindowManager;
 import android.widget.SeekBar;
 import android.widget.Toast;
@@ -32,7 +35,12 @@ import com.google.android.material.tabs.TabLayout;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 public class MainActivity extends AppCompatActivity implements TrackDataProvider {
 
@@ -47,6 +55,8 @@ public class MainActivity extends AppCompatActivity implements TrackDataProvider
 
     private final Fragment[] fragments = new Fragment[4];
     private int currentTabIndex = 0;
+
+    private AppSettings settings;
 
     private final Handler seekHandler = new Handler(Looper.getMainLooper());
     private final Runnable seekUpdater = new Runnable() {
@@ -64,7 +74,17 @@ public class MainActivity extends AppCompatActivity implements TrackDataProvider
         }
     };
 
-    private final ActivityResultLauncher<String> permissionLauncher =
+    private final ActivityResultLauncher<String[]> multiPermissionLauncher =
+            registerForActivityResult(new ActivityResultContracts.RequestMultiplePermissions(), result -> {
+                boolean allGranted = !result.containsValue(false);
+                if (allGranted) {
+                    loadTracks();
+                } else {
+                    Toast.makeText(this, R.string.permission_required, Toast.LENGTH_LONG).show();
+                }
+            });
+
+    private final ActivityResultLauncher<String> singlePermissionLauncher =
             registerForActivityResult(new ActivityResultContracts.RequestPermission(), granted -> {
                 if (granted) {
                     loadTracks();
@@ -79,6 +99,8 @@ public class MainActivity extends AppCompatActivity implements TrackDataProvider
         binding = ActivityMainBinding.inflate(getLayoutInflater());
         setContentView(binding.getRoot());
 
+        settings = new AppSettings(this);
+
         enableFullscreen();
         setSupportActionBar(binding.toolbar);
 
@@ -88,6 +110,21 @@ public class MainActivity extends AppCompatActivity implements TrackDataProvider
         requestNotificationPermission();
     }
 
+    @Override
+    public boolean onCreateOptionsMenu(Menu menu) {
+        getMenuInflater().inflate(R.menu.main_menu, menu);
+        return true;
+    }
+
+    @Override
+    public boolean onOptionsItemSelected(MenuItem item) {
+        if (item.getItemId() == R.id.action_settings) {
+            startActivity(new Intent(this, SettingsActivity.class));
+            return true;
+        }
+        return super.onOptionsItemSelected(item);
+    }
+
     private void enableFullscreen() {
         WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
         WindowInsetsControllerCompat controller =
@@ -95,7 +132,6 @@ public class MainActivity extends AppCompatActivity implements TrackDataProvider
         controller.hide(WindowInsetsCompat.Type.systemBars());
         controller.setSystemBarsBehavior(
                 WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
     }
 
     private void requestNotificationPermission() {
@@ -152,6 +188,13 @@ public class MainActivity extends AppCompatActivity implements TrackDataProvider
         binding.btnNext.setOnClickListener(v -> playNext());
         binding.btnPrevious.setOnClickListener(v -> playPrevious());
 
+        binding.ivNowPlayingArtwork.setOnClickListener(v -> {
+            if (currentQueueIndex >= 0 && currentQueueIndex < currentQueue.size()) {
+                Track track = currentQueue.get(currentQueueIndex);
+                startActivity(ArtworkActivity.newIntent(this, track.albumId));
+            }
+        });
+
         binding.seekbar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
@@ -176,14 +219,23 @@ public class MainActivity extends AppCompatActivity implements TrackDataProvider
     }
 
     private void checkPermissionAndLoad() {
-        String permission = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
-                ? Manifest.permission.READ_MEDIA_AUDIO
-                : Manifest.permission.READ_EXTERNAL_STORAGE;
-
-        if (ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED) {
-            loadTracks();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            String permAudio = Manifest.permission.READ_MEDIA_AUDIO;
+            String permImages = Manifest.permission.READ_MEDIA_IMAGES;
+            boolean hasAudio = ContextCompat.checkSelfPermission(this, permAudio) == PackageManager.PERMISSION_GRANTED;
+            boolean hasImages = ContextCompat.checkSelfPermission(this, permImages) == PackageManager.PERMISSION_GRANTED;
+            if (hasAudio && hasImages) {
+                loadTracks();
+            } else {
+                multiPermissionLauncher.launch(new String[]{permAudio, permImages});
+            }
         } else {
-            permissionLauncher.launch(permission);
+            String permission = Manifest.permission.READ_EXTERNAL_STORAGE;
+            if (ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED) {
+                loadTracks();
+            } else {
+                singlePermissionLauncher.launch(permission);
+            }
         }
     }
 
@@ -249,7 +301,19 @@ public class MainActivity extends AppCompatActivity implements TrackDataProvider
             }
         }
 
+        registerAlbums();
         notifyFragmentsDataLoaded();
+    }
+
+    private void registerAlbums() {
+        ArtworkCache artworkCache = ArtworkCache.getInstance(this);
+        artworkCache.clearAlbumRegistry();
+        Set<Long> seen = new HashSet<>();
+        for (Track t : tracks) {
+            if (seen.add(t.albumId)) {
+                artworkCache.registerAlbum(t.albumId, t.uri, t.folderPath);
+            }
+        }
     }
 
     private void notifyFragmentsDataLoaded() {
@@ -305,12 +369,26 @@ public class MainActivity extends AppCompatActivity implements TrackDataProvider
         binding.seekbar.setProgress(0);
         binding.btnPlayPause.setImageResource(R.drawable.ic_pause);
 
+        ArtworkCache.getInstance(this).loadArtwork(
+                "album:" + track.albumId, binding.ivNowPlayingArtwork, 144);
+
         mediaPlayer = new MediaPlayer();
         try {
             mediaPlayer.setDataSource(this, track.uri);
-            mediaPlayer.prepare();
-            mediaPlayer.start();
+            mediaPlayer.setOnPreparedListener(mp -> {
+                if (mp == mediaPlayer) {
+                    mp.start();
+                }
+            });
             mediaPlayer.setOnCompletionListener(mp -> playNext());
+            mediaPlayer.setOnErrorListener((mp, what, extra) -> {
+                if (mp == mediaPlayer) {
+                    Toast.makeText(this, "Could not play track", Toast.LENGTH_SHORT).show();
+                    releasePlayer();
+                }
+                return true;
+            });
+            mediaPlayer.prepareAsync();
         } catch (Exception e) {
             Toast.makeText(this, "Could not play track", Toast.LENGTH_SHORT).show();
             releasePlayer();
@@ -319,8 +397,11 @@ public class MainActivity extends AppCompatActivity implements TrackDataProvider
         seekHandler.removeCallbacks(seekUpdater);
         seekHandler.post(seekUpdater);
 
+        Bitmap artwork = ArtworkCache.getInstance(this).getCachedBitmap("album:" + track.albumId);
+        MusicService.setPendingArtwork(artwork);
         startMusicService(track.title, track.artist);
         notifyPlaybackObservers();
+        ArtworkActivity.notifyAlbumChanged(track.albumId);
     }
 
     private void startMusicService(String title, String artist) {
@@ -363,7 +444,58 @@ public class MainActivity extends AppCompatActivity implements TrackDataProvider
 
     private void playNext() {
         if (currentQueue.isEmpty()) return;
-        currentQueueIndex = (currentQueueIndex + 1) % currentQueue.size();
+        int nextIndex = currentQueueIndex + 1;
+        if (nextIndex < currentQueue.size()) {
+            currentQueueIndex = nextIndex;
+            playCurrentQueueTrack();
+        } else if (settings.isContinuousPlayback()) {
+            continueToNextAlbum();
+        } else {
+            currentQueueIndex = 0;
+            playCurrentQueueTrack();
+        }
+    }
+
+    private void continueToNextAlbum() {
+        if (currentQueue.isEmpty() || tracks.isEmpty()) return;
+
+        Track lastTrack = currentQueue.get(currentQueue.size() - 1);
+        long currentAlbumId = lastTrack.albumId;
+
+        // Build sorted list of unique albums
+        Map<Long, List<Track>> albumMap = new LinkedHashMap<>();
+        for (Track t : tracks) {
+            List<Track> list = albumMap.get(t.albumId);
+            if (list == null) {
+                list = new ArrayList<>();
+                albumMap.put(t.albumId, list);
+            }
+            list.add(t);
+        }
+
+        // Sort each album's tracks by trackNumber then title
+        for (List<Track> list : albumMap.values()) {
+            Collections.sort(list, (a, b) -> {
+                int cmp = Integer.compare(a.trackNumber, b.trackNumber);
+                return cmp != 0 ? cmp : a.title.compareToIgnoreCase(b.title);
+            });
+        }
+
+        // Sort albums alphabetically by album name
+        List<Long> albumIds = new ArrayList<>(albumMap.keySet());
+        Collections.sort(albumIds, (a, b) -> {
+            String nameA = albumMap.get(a).get(0).album;
+            String nameB = albumMap.get(b).get(0).album;
+            return nameA.compareToIgnoreCase(nameB);
+        });
+
+        // Find current album index and get next
+        int currentIdx = albumIds.indexOf(currentAlbumId);
+        int nextIdx = (currentIdx + 1) % albumIds.size();
+        long nextAlbumId = albumIds.get(nextIdx);
+
+        currentQueue = new ArrayList<>(albumMap.get(nextAlbumId));
+        currentQueueIndex = 0;
         playCurrentQueueTrack();
     }
 

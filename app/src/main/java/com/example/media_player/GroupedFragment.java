@@ -11,12 +11,12 @@ import androidx.activity.OnBackPressedCallback;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.fragment.app.Fragment;
+import androidx.recyclerview.widget.GridLayoutManager;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -31,6 +31,7 @@ public class GroupedFragment extends Fragment implements PlaybackObserver, Track
 
     private TrackDataProvider dataProvider;
     private int mode;
+    private int viewType;
 
     private RecyclerView recyclerCategories;
     private View detailContainer;
@@ -91,8 +92,15 @@ public class GroupedFragment extends Fragment implements PlaybackObserver, Track
         tvEmpty = view.findViewById(R.id.tv_empty);
         View backHeader = view.findViewById(R.id.back_header);
 
-        categoryAdapter = new CategoryAdapter(categories, this);
-        recyclerCategories.setLayoutManager(new LinearLayoutManager(requireContext()));
+        if (mode == MODE_ALBUM) {
+            viewType = CategoryAdapter.VIEW_TYPE_GRID;
+            recyclerCategories.setLayoutManager(new GridLayoutManager(requireContext(), 3));
+        } else {
+            viewType = CategoryAdapter.VIEW_TYPE_LIST;
+            recyclerCategories.setLayoutManager(new LinearLayoutManager(requireContext()));
+        }
+
+        categoryAdapter = new CategoryAdapter(categories, this, viewType);
         recyclerCategories.setAdapter(categoryAdapter);
 
         detailTrackAdapter = new TrackAdapter(detailTracks, this);
@@ -161,28 +169,41 @@ public class GroupedFragment extends Fragment implements PlaybackObserver, Track
             Track first = tracks.get(0);
             String title;
             String subtitle;
+            String artworkKey;
             switch (mode) {
                 case MODE_ALBUM:
                     title = first.album != null && !first.album.isEmpty() ? first.album : "Unknown";
-                    subtitle = first.artist != null && !first.artist.isEmpty() ? first.artist : "Unknown";
+                    String artist = first.artist != null && !first.artist.isEmpty() ? first.artist : "Unknown";
+                    String releaseType = classifyRelease(tracks.size());
+                    subtitle = artist + " -- " + releaseType;
+                    artworkKey = "album:" + key;
                     break;
                 case MODE_ARTIST:
                     title = key;
                     long albumCount = tracks.stream().map(t -> t.albumId).distinct().count();
                     subtitle = albumCount + (albumCount == 1 ? " album" : " albums");
+                    artworkKey = null;
                     break;
                 case MODE_FOLDER:
                     title = first.folderName != null && !first.folderName.isEmpty() ? first.folderName : "Unknown";
                     subtitle = first.folderPath != null ? first.folderPath : "";
+                    artworkKey = "folder:" + (first.folderPath != null ? first.folderPath : "");
                     break;
                 default:
                     title = key;
                     subtitle = "";
+                    artworkKey = null;
             }
-            items.add(new CategoryItem(key, title, subtitle, tracks.size()));
+            items.add(new CategoryItem(key, title, subtitle, tracks.size(), artworkKey));
         }
         Collections.sort(items, (a, b) -> a.title.compareToIgnoreCase(b.title));
         categories.addAll(items);
+    }
+
+    private String classifyRelease(int trackCount) {
+        if (trackCount <= 1) return "Single";
+        if (trackCount <= 4) return "EP";
+        return "Album";
     }
 
     private void sortTracksInGroup(List<Track> list) {

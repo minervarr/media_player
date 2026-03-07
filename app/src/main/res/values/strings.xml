@@ -11,4 +11,10 @@
     <string name="btn_play">Play</string>
     <string name="btn_pause">Pause</string>
     <string name="btn_back">Back</string>
+    <string name="settings_title">Settings</string>
+    <string name="setting_continuous_playback">Continuous playback</string>
+    <string name="setting_continuous_playback_desc">Continue to next album when queue ends</string>
+    <string name="artwork_fullscreen">Album artwork</string>
+    <string name="btn_rotate">Rotate screen</string>
+    <string name="btn_screen_toggle">Toggle screen timeout</string>
 </resources>

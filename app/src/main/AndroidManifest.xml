@@ -6,6 +6,9 @@
         android:name="android.permission.READ_MEDIA_AUDIO"
         tools:ignore="ScopedStorage" />
     <uses-permission
+        android:name="android.permission.READ_MEDIA_IMAGES"
+        tools:ignore="ScopedStorage" />
+    <uses-permission
         android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
@@ -30,6 +33,14 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity
+            android:name=".SettingsActivity"
+            android:exported="false"
+            android:screenOrientation="portrait" />
+        <activity
+            android:name=".ArtworkActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Media_player" />
         <service
             android:name=".MusicService"
             android:foregroundServiceType="mediaPlayback"

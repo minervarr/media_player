@@ -7,6 +7,7 @@ import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
+import android.graphics.Bitmap;
 import android.os.Build;
 import android.os.IBinder;
 
@@ -21,6 +22,12 @@ public class MusicService extends Service {
     public static final String ACTION_UPDATE = "com.example.media_player.UPDATE";
     public static final String EXTRA_TITLE = "title";
     public static final String EXTRA_ARTIST = "artist";
+
+    private static Bitmap pendingArtwork;
+
+    public static void setPendingArtwork(Bitmap bitmap) {
+        pendingArtwork = bitmap;
+    }
 
     @Override
     public void onCreate() {
@@ -57,14 +64,20 @@ public class MusicService extends Service {
         PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, openIntent,
                 PendingIntent.FLAG_IMMUTABLE);
 
-        return new NotificationCompat.Builder(this, CHANNEL_ID)
+        NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle(title)
                 .setContentText(artist)
                 .setSmallIcon(android.R.drawable.ic_media_play)
                 .setContentIntent(pendingIntent)
                 .setOngoing(true)
-                .setSilent(true)
-                .build();
+                .setSilent(true);
+
+        if (pendingArtwork != null) {
+            builder.setLargeIcon(pendingArtwork);
+            pendingArtwork = null;
+        }
+
+        return builder.build();
     }
 
     private void createNotificationChannel() {
@@ -72,7 +85,9 @@ public class MusicService extends Service {
                 CHANNEL_ID, "Music Playback", NotificationManager.IMPORTANCE_LOW);
         channel.setDescription("Shows when music is playing");
         NotificationManager nm = getSystemService(NotificationManager.class);
-        nm.createNotificationChannel(channel);
+        if (nm != null) {
+            nm.createNotificationChannel(channel);
+        }
     }
 
     @Nullable
