@@ -103,6 +103,18 @@
                     android:ellipsize="end"
                     android:text="" />
 
+                <TextView
+                    android:id="@+id/tv_audio_output_info"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textColor="@color/green_dim"
+                    android:textSize="10sp"
+                    android:fontFamily="monospace"
+                    android:maxLines="1"
+                    android:ellipsize="end"
+                    android:visibility="gone"
+                    android:text="" />
+
             </LinearLayout>
 
         </LinearLayout>

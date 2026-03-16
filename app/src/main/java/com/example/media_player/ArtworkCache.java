@@ -10,6 +10,7 @@ import android.graphics.Paint;
 import android.media.MediaMetadataRetriever;
 import android.net.Uri;
 import android.os.Handler;
+import android.util.Log;
 import android.os.Looper;
 import android.util.LruCache;
 import android.widget.ImageView;
@@ -24,6 +25,7 @@ import java.util.concurrent.Executors;
 
 public class ArtworkCache {
 
+    private static final String TAG = "ArtworkCache";
     private static ArtworkCache instance;
 
     private final LruCache<String, Bitmap> cache;
@@ -54,6 +56,7 @@ public class ArtworkCache {
         appContext = context.getApplicationContext();
         int maxMemory = (int) (Runtime.getRuntime().maxMemory() / 1024);
         int cacheSize = maxMemory / 8;
+        Log.d(TAG, "init: cache size " + (cacheSize / 1024) + "MB (max heap " + (maxMemory / 1024) + "MB)");
         cache = new LruCache<String, Bitmap>(cacheSize) {
             @Override
             protected int sizeOf(String key, Bitmap bitmap) {
@@ -197,18 +200,28 @@ public class ArtworkCache {
 
         // Step 1: Embedded picture via MediaMetadataRetriever
         Bitmap result = tryEmbeddedPicture(info.trackUri, sizePx);
-        if (result != null) return result;
+        if (result != null) {
+            Log.d(TAG, "resolve " + artworkKey + ": embedded picture");
+            return result;
+        }
 
         // Step 2: Album art content URI
         result = tryAlbumArtUri(albumId, sizePx);
-        if (result != null) return result;
+        if (result != null) {
+            Log.d(TAG, "resolve " + artworkKey + ": album art URI");
+            return result;
+        }
 
         // Step 3: Folder cover file
         if (info.folderPath != null && !info.folderPath.isEmpty()) {
             result = resolveFolder(info.folderPath, sizePx);
-            if (result != null) return result;
+            if (result != null) {
+                Log.d(TAG, "resolve " + artworkKey + ": folder cover");
+                return result;
+            }
         }
 
+        Log.d(TAG, "resolve " + artworkKey + ": no artwork found");
         return null;
     }
 
