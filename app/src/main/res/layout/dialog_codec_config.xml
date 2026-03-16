@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="@color/bg_surface"
+    android:padding="20dp">
+
+    <TextView
+        android:id="@+id/dialog_device_name"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textColor="@color/green_bright"
+        android:textSize="16sp"
+        android:textStyle="bold"
+        android:layout_marginBottom="16dp" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/bt_codec_label"
+        android:textColor="@color/text_secondary"
+        android:textSize="12sp" />
+
+    <Spinner
+        android:id="@+id/spinner_codec"
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:layout_marginBottom="12dp"
+        android:backgroundTint="@color/green_bright" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/bt_codec_sample_rate"
+        android:textColor="@color/text_secondary"
+        android:textSize="12sp" />
+
+    <Spinner
+        android:id="@+id/spinner_sample_rate"
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:layout_marginBottom="12dp"
+        android:backgroundTint="@color/green_bright" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/bt_codec_bit_depth"
+        android:textColor="@color/text_secondary"
+        android:textSize="12sp" />
+
+    <Spinner
+        android:id="@+id/spinner_bit_depth"
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:layout_marginBottom="12dp"
+        android:backgroundTint="@color/green_bright" />
+
+    <TextView
+        android:id="@+id/label_ldac_quality"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/bt_codec_ldac_quality"
+        android:textColor="@color/text_secondary"
+        android:textSize="12sp"
+        android:visibility="gone" />
+
+    <Spinner
+        android:id="@+id/spinner_ldac_quality"
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:layout_marginBottom="12dp"
+        android:backgroundTint="@color/green_bright"
+        android:visibility="gone" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginTop="8dp"
+        android:gravity="end">
+
+        <TextView
+            android:id="@+id/btn_remove"
+            android:layout_width="wrap_content"
+            android:layout_height="40dp"
+            android:gravity="center"
+            android:text="@string/bt_codec_remove"
+            android:textColor="@color/text_secondary"
+            android:textSize="14sp"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:layout_marginEnd="8dp" />
+
+        <TextView
+            android:id="@+id/btn_save"
+            android:layout_width="wrap_content"
+            android:layout_height="40dp"
+            android:gravity="center"
+            android:text="@string/bt_codec_save"
+            android:textColor="@color/green_bright"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:layout_marginEnd="8dp" />
+
+        <TextView
+            android:id="@+id/btn_apply_now"
+            android:layout_width="wrap_content"
+            android:layout_height="40dp"
+            android:gravity="center"
+            android:text="@string/bt_codec_apply_now"
+            android:textColor="@color/green_bright"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp" />
+
+    </LinearLayout>
+
+</LinearLayout>

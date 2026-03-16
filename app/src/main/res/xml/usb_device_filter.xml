@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Hiby FC4 DAC (VID 0x2972 = 10610) -->
+    <usb-device vendor-id="10610" />
+    <!-- Generic USB Audio Class devices -->
+    <usb-device class="1" />
+</resources>
