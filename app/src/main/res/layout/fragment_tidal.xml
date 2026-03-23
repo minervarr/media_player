@@ -1,0 +1,219 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg_primary">
+
+    <!-- Login prompt (shown when not authenticated) -->
+    <LinearLayout
+        android:id="@+id/login_container"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:padding="32dp"
+        android:visibility="gone">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/tidal_login_title"
+            android:textColor="@color/green_bright"
+            android:textSize="18sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="@string/tidal_login_instructions"
+            android:textColor="@color/text_secondary"
+            android:textSize="14sp"
+            android:gravity="center" />
+
+        <TextView
+            android:id="@+id/tv_user_code"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:textColor="@color/green_bright"
+            android:textSize="32sp"
+            android:fontFamily="monospace"
+            android:textStyle="bold"
+            android:letterSpacing="0.2" />
+
+        <TextView
+            android:id="@+id/tv_verification_uri"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:textColor="@color/text_primary"
+            android:textSize="14sp" />
+
+        <TextView
+            android:id="@+id/tv_login_status"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:text="@string/tidal_waiting_auth"
+            android:textColor="@color/text_secondary"
+            android:textSize="12sp" />
+
+        <TextView
+            android:id="@+id/btn_tidal_login"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="32dp"
+            android:text="@string/tidal_login"
+            android:textColor="@color/green_bright"
+            android:textSize="16sp"
+            android:padding="12dp"
+            android:clickable="true"
+            android:focusable="true" />
+
+    </LinearLayout>
+
+    <!-- Library browser (shown when authenticated) -->
+    <LinearLayout
+        android:id="@+id/library_container"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <!-- Search bar -->
+        <LinearLayout
+            android:id="@+id/search_bar"
+            android:layout_width="match_parent"
+            android:layout_height="44dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:background="@color/bg_surface"
+            android:visibility="gone">
+
+            <EditText
+                android:id="@+id/et_search"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:hint="@string/tidal_search_hint"
+                android:textColor="@color/text_primary"
+                android:textColorHint="@color/text_secondary"
+                android:textSize="14sp"
+                android:background="@android:color/transparent"
+                android:inputType="text"
+                android:imeOptions="actionSearch"
+                android:maxLines="1" />
+
+            <TextView
+                android:id="@+id/btn_search_close"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/tidal_cancel"
+                android:textColor="@color/text_secondary"
+                android:textSize="14sp"
+                android:paddingStart="12dp"
+                android:paddingEnd="4dp" />
+
+        </LinearLayout>
+
+        <!-- Grid back header (shown in grid/search views) -->
+        <LinearLayout
+            android:id="@+id/grid_back_header"
+            android:layout_width="match_parent"
+            android:layout_height="44dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingStart="12dp"
+            android:paddingEnd="16dp"
+            android:background="@color/bg_surface"
+            android:visibility="gone">
+
+            <ImageView
+                android:layout_width="20dp"
+                android:layout_height="20dp"
+                android:src="@drawable/ic_back"
+                app:tint="@color/green_primary"
+                android:contentDescription="@string/btn_back" />
+
+            <TextView
+                android:id="@+id/tv_grid_title"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="8dp"
+                android:textColor="@color/green_bright"
+                android:textSize="14sp"
+                android:maxLines="1"
+                android:ellipsize="end" />
+
+        </LinearLayout>
+
+        <!-- Category home view -->
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/recycler_home"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+
+    </LinearLayout>
+
+    <!-- Detail view (album/playlist tracks) -->
+    <LinearLayout
+        android:id="@+id/detail_container"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:id="@+id/back_header"
+            android:layout_width="match_parent"
+            android:layout_height="44dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingStart="12dp"
+            android:paddingEnd="16dp"
+            android:background="@color/bg_surface">
+
+            <ImageView
+                android:layout_width="20dp"
+                android:layout_height="20dp"
+                android:src="@drawable/ic_back"
+                app:tint="@color/green_primary"
+                android:contentDescription="@string/btn_back" />
+
+            <TextView
+                android:id="@+id/tv_detail_title"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="8dp"
+                android:textColor="@color/green_bright"
+                android:textSize="14sp"
+                android:maxLines="1"
+                android:ellipsize="end" />
+
+        </LinearLayout>
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/recycler_detail_tracks"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+
+    </LinearLayout>
+
+    <!-- Loading indicator -->
+    <TextView
+        android:id="@+id/tv_loading"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:text="@string/tidal_loading"
+        android:textColor="@color/text_secondary"
+        android:textSize="14sp"
+        android:visibility="gone" />
+
+</FrameLayout>
