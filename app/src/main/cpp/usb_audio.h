@@ -92,6 +92,13 @@ public:
         return (w + capacity - r) % capacity;
     }
 
+    // Returns a conservative lower bound on free space (reader may free more at any time).
+    size_t getFreeSpace() const {
+        size_t r = readPos.load(std::memory_order_acquire);
+        size_t w = writePos.load(std::memory_order_relaxed);
+        return (r + capacity - w - 1) % capacity;
+    }
+
     void clear() {
         readPos.store(0);
         writePos.store(0);
@@ -129,7 +136,8 @@ public:
     bool configure(int sampleRate, int channels, int bitDepth);
     bool start();
     int write(const uint8_t* data, int length);
-    int writeFloat32(const float* data, int length);
+    int writeFloat32(const float* data, int numSamples);
+    int writeInt16(const int16_t* data, int numSamples);
     void flush();
     void stop();
     void close();

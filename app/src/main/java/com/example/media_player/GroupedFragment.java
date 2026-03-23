@@ -2,6 +2,8 @@ package com.example.media_player;
 
 import android.content.Context;
 import android.os.Bundle;
+import android.transition.Fade;
+import android.transition.TransitionManager;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -11,6 +13,8 @@ import androidx.activity.OnBackPressedCallback;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.fragment.app.Fragment;
+import androidx.interpolator.view.animation.FastOutSlowInInterpolator;
+import androidx.recyclerview.widget.DefaultItemAnimator;
 import androidx.recyclerview.widget.GridLayoutManager;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
@@ -117,6 +121,9 @@ public class GroupedFragment extends Fragment implements PlaybackObserver, Track
         recyclerDetailTracks.setAdapter(detailTrackAdapter);
 
         backHeader.setOnClickListener(v -> showCategoryList());
+
+        setItemAnimatorDurations(recyclerCategories);
+        setItemAnimatorDurations(recyclerDetailTracks);
 
         loadData();
     }
@@ -303,6 +310,11 @@ public class GroupedFragment extends Fragment implements PlaybackObserver, Track
     }
 
     private void showDetail(String title, List<Track> tracks) {
+        Fade fade = new Fade();
+        fade.setDuration(150);
+        fade.setInterpolator(new FastOutSlowInInterpolator());
+        TransitionManager.beginDelayedTransition((ViewGroup) requireView(), fade);
+
         tvDetailTitle.setText(title);
         detailTracks.clear();
         detailTracks.addAll(tracks);
@@ -315,9 +327,23 @@ public class GroupedFragment extends Fragment implements PlaybackObserver, Track
     }
 
     private void showCategoryList() {
+        Fade fade = new Fade();
+        fade.setDuration(150);
+        fade.setInterpolator(new FastOutSlowInInterpolator());
+        TransitionManager.beginDelayedTransition((ViewGroup) requireView(), fade);
+
         detailContainer.setVisibility(View.GONE);
         recyclerCategories.setVisibility(View.VISIBLE);
         backCallback.setEnabled(false);
+    }
+
+    private static void setItemAnimatorDurations(RecyclerView rv) {
+        DefaultItemAnimator animator = new DefaultItemAnimator();
+        animator.setAddDuration(150);
+        animator.setRemoveDuration(150);
+        animator.setMoveDuration(150);
+        animator.setChangeDuration(150);
+        rv.setItemAnimator(animator);
     }
 
     @Override

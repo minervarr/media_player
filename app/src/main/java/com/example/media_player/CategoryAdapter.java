@@ -52,14 +52,22 @@ public class CategoryAdapter extends RecyclerView.Adapter<CategoryAdapter.ViewHo
         holder.tvTitle.setText(item.title);
         holder.tvSubtitle.setText(item.subtitle);
         if (holder.tvCount != null) {
-            holder.tvCount.setText(String.valueOf(item.trackCount));
+            if (item.trackCount > 0) {
+                holder.tvCount.setVisibility(View.VISIBLE);
+                holder.tvCount.setText(String.valueOf(item.trackCount));
+            } else {
+                holder.tvCount.setVisibility(View.GONE);
+            }
         }
         if (holder.ivArtwork != null && item.artworkKey != null) {
+            holder.ivArtwork.setVisibility(View.VISIBLE);
             if (artworkSizePx < 0) {
                 artworkSizePx = holder.ivArtwork.getContext().getResources().getDisplayMetrics().widthPixels / 3;
             }
             ArtworkCache.getInstance(holder.ivArtwork.getContext())
                     .loadArtwork(item.artworkKey, holder.ivArtwork, artworkSizePx);
+        } else if (holder.ivArtwork != null) {
+            holder.ivArtwork.setVisibility(View.GONE);
         }
         holder.itemView.setOnClickListener(v -> listener.onCategoryClick(item));
     }

@@ -5,24 +5,45 @@ import android.media.AudioFormat;
 import android.media.AudioTrack;
 import android.util.Log;
 
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+
 public class AudioTrackOutput implements AudioOutput {
 
     private static final String TAG = "AudioTrackOutput";
     private AudioTrack audioTrack;
+    private boolean floatToInt16;
+    private byte[] convBuf;
 
     @Override
-    public boolean configure(int sampleRate, int channelCount, int encoding) {
+    public boolean configure(int sampleRate, int channelCount, int encoding, int sourceBitDepth) {
+        if (sourceBitDepth == 1) {
+            Log.d(TAG, "configure: DSD not supported on speaker output");
+            return false;
+        }
+
         release();
+
+        // Speaker hardware often can't handle PCM_FLOAT properly (garbled/slow
+        // output). Downgrade to PCM_16BIT and convert in the write path.
+        // USB output receives float data directly via UsbAudioOutput.
+        int trackEncoding = encoding;
+        floatToInt16 = false;
+        if (encoding == AudioFormat.ENCODING_PCM_FLOAT) {
+            trackEncoding = AudioFormat.ENCODING_PCM_16BIT;
+            floatToInt16 = true;
+            Log.d(TAG, "configure: downgrading PCM_FLOAT -> PCM_16BIT for speaker");
+        }
 
         try {
             int channelMask = channelCount == 1
                     ? AudioFormat.CHANNEL_OUT_MONO
                     : AudioFormat.CHANNEL_OUT_STEREO;
 
-            int minBufSize = AudioTrack.getMinBufferSize(sampleRate, channelMask, encoding);
+            int minBufSize = AudioTrack.getMinBufferSize(sampleRate, channelMask, trackEncoding);
             int bufSize = Math.max(minBufSize * 4, 16384);
 
-            Log.d(TAG, "configure: " + sampleRate + "Hz/" + channelCount + "ch enc=" + encoding + " buf=" + bufSize);
+            Log.d(TAG, "configure: " + sampleRate + "Hz/" + channelCount + "ch enc=" + trackEncoding + " buf=" + bufSize);
 
             audioTrack = new AudioTrack.Builder()
                     .setAudioAttributes(new AudioAttributes.Builder()
@@ -32,7 +53,7 @@ public class AudioTrackOutput implements AudioOutput {
                     .setAudioFormat(new AudioFormat.Builder()
                             .setSampleRate(sampleRate)
                             .setChannelMask(channelMask)
-                            .setEncoding(encoding)
+                            .setEncoding(trackEncoding)
                             .build())
                     .setBufferSizeInBytes(bufSize)
                     .setTransferMode(AudioTrack.MODE_STREAM)
@@ -61,10 +82,35 @@ public class AudioTrackOutput implements AudioOutput {
 
     @Override
     public int write(byte[] data, int offset, int length) {
-        if (audioTrack != null) {
-            return audioTrack.write(data, offset, length);
+        if (audioTrack == null) return -1;
+
+        if (floatToInt16) {
+            // Convert float32 LE samples to int16 LE.
+            // 4 bytes per float sample -> 2 bytes per int16 sample.
+            int samples = length / 4;
+            int outBytes = samples * 2;
+            if (convBuf == null || convBuf.length < outBytes) {
+                convBuf = new byte[outBytes];
+            }
+            for (int i = 0, si = offset, di = 0; i < samples; i++, si += 4, di += 2) {
+                int bits = (data[si] & 0xFF)
+                        | ((data[si + 1] & 0xFF) << 8)
+                        | ((data[si + 2] & 0xFF) << 16)
+                        | ((data[si + 3] & 0xFF) << 24);
+                float sample = Float.intBitsToFloat(bits);
+                int pcm = (int) (sample * 32767.0f);
+                if (pcm > 32767) pcm = 32767;
+                else if (pcm < -32768) pcm = -32768;
+                convBuf[di] = (byte) (pcm & 0xFF);
+                convBuf[di + 1] = (byte) ((pcm >> 8) & 0xFF);
+            }
+            int written = audioTrack.write(convBuf, 0, outBytes);
+            if (written < 0) return written;
+            // Return the number of float input bytes consumed
+            return (written / 2) * 4;
         }
-        return -1;
+
+        return audioTrack.write(data, offset, length);
     }
 
     @Override
@@ -108,5 +154,6 @@ public class AudioTrackOutput implements AudioOutput {
             audioTrack.release();
             audioTrack = null;
         }
+        convBuf = null;
     }
 }

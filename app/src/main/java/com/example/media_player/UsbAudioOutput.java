@@ -13,6 +13,7 @@ public class UsbAudioOutput implements AudioOutput {
 
     private int inputEncoding;
     private int dacBitDepth;
+    private boolean dsdMode;
 
     public UsbAudioOutput(int fd) {
         this.fd = fd;
@@ -32,7 +33,7 @@ public class UsbAudioOutput implements AudioOutput {
     }
 
     @Override
-    public boolean configure(int sampleRate, int channelCount, int encoding) {
+    public boolean configure(int sampleRate, int channelCount, int encoding, int sourceBitDepth) {
         if (nativeHandle == 0) {
             if (!open()) {
                 Log.e(TAG, "Failed to open USB device");
@@ -47,22 +48,31 @@ public class UsbAudioOutput implements AudioOutput {
         }
 
         this.inputEncoding = encoding;
+        dsdMode = sourceBitDepth == 1;
 
-        // Match DAC bit depth to input encoding for correct sample framing.
-        // The native write path passes raw bytes to the ring buffer, so the
-        // DAC's configured bit depth must match the input sample size.
+        // Use source bit depth to configure DAC for source-native playback.
+        // DSD uses 32-bit container regardless of source depth.
+        // 24-bit FLAC decoded to float -> request 24-bit from DAC
+        // 16-bit FLAC decoded to 16-bit -> request 16-bit from DAC
+        // Fallback to encoding-based derivation if sourceBitDepth unknown.
         int requestedBitDepth;
-        switch (encoding) {
-            case AudioFormat.ENCODING_PCM_FLOAT:
-            case AudioFormat.ENCODING_PCM_32BIT:
-                requestedBitDepth = 32;
-                break;
-            case AudioFormat.ENCODING_PCM_24BIT_PACKED:
-                requestedBitDepth = 24;
-                break;
-            default:
-                requestedBitDepth = 16;
-                break;
+        if (dsdMode) {
+            requestedBitDepth = 32;
+        } else if (sourceBitDepth > 0) {
+            requestedBitDepth = sourceBitDepth;
+        } else {
+            switch (encoding) {
+                case AudioFormat.ENCODING_PCM_FLOAT:
+                case AudioFormat.ENCODING_PCM_32BIT:
+                    requestedBitDepth = 32;
+                    break;
+                case AudioFormat.ENCODING_PCM_24BIT_PACKED:
+                    requestedBitDepth = 24;
+                    break;
+                default:
+                    requestedBitDepth = 16;
+                    break;
+            }
         }
 
         if (!UsbAudioNative.nativeConfigure(nativeHandle, sampleRate, channelCount, requestedBitDepth)) {
@@ -75,8 +85,21 @@ public class UsbAudioOutput implements AudioOutput {
             dacBitDepth = 16;
         }
 
-        Log.i(TAG, "Configured: inputEncoding=" + encodingName(inputEncoding)
-                + " dacBitDepth=" + dacBitDepth);
+        if (dsdMode) {
+            String dsdLabel;
+            switch (sampleRate) {
+                case 88200: dsdLabel = "DSD64"; break;
+                case 176400: dsdLabel = "DSD128"; break;
+                case 352800: dsdLabel = "DSD256"; break;
+                default: dsdLabel = "DSD"; break;
+            }
+            Log.i(TAG, "Configured DSD: rate=" + sampleRate + "(" + dsdLabel + ") dac=" + dacBitDepth + "bit");
+        } else {
+            Log.i(TAG, "Configured: inputEncoding=" + encodingName(inputEncoding)
+                    + " source=" + sourceBitDepth + "bit"
+                    + " requested=" + requestedBitDepth + "bit"
+                    + " dac=" + dacBitDepth + "bit");
+        }
         return true;
     }
 
@@ -96,19 +119,25 @@ public class UsbAudioOutput implements AudioOutput {
         if (nativeHandle == 0 || !started) return -1;
 
         if (inputEncoding == AudioFormat.ENCODING_PCM_FLOAT) {
-            // Float32 conversion done in native C++ -- zero Java-side allocation
+            // Float32 -> DAC bit depth conversion in native C++
             return UsbAudioNative.nativeWriteFloat32(nativeHandle, data, offset, length);
         }
 
-        // 16-bit integer PCM: pass raw bytes to native.
-        // If DAC bit depth matches input (16-bit), this is bit-perfect passthrough.
-        // If DAC needs higher bit depth, native ring buffer receives 16-bit and
-        // the USB transfer sends it as-is (the DAC handles zero-padded LSBs).
+        if (inputEncoding == AudioFormat.ENCODING_PCM_16BIT && dacBitDepth != 16) {
+            // 16-bit PCM but DAC configured at higher depth -- native upscaling
+            return UsbAudioNative.nativeWriteInt16(nativeHandle, data, offset, length);
+        }
+
+        // Raw passthrough (bit-perfect when DAC bit depth matches input)
         return UsbAudioNative.nativeWrite(nativeHandle, data, offset, length);
     }
 
     public int getConfiguredBitDepth() {
         return dacBitDepth;
+    }
+
+    public boolean isDsdMode() {
+        return dsdMode;
     }
 
     public int getUacVersion() {

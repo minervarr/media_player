@@ -27,7 +27,7 @@
         app:tabTextColor="@color/text_secondary"
         app:tabSelectedTextColor="@color/green_bright"
         app:tabIndicatorColor="@color/green_primary"
-        app:tabMode="fixed"
+        app:tabMode="scrollable"
         app:tabGravity="fill"
         app:layout_constraintTop_toBottomOf="@id/toolbar"
         app:layout_constraintStart_toStartOf="parent"
@@ -84,7 +84,6 @@
                     android:layout_height="wrap_content"
                     android:textColor="@color/green_bright"
                     android:textSize="14sp"
-                    android:fontFamily="monospace"
                     android:maxLines="1"
                     android:ellipsize="marquee"
                     android:marqueeRepeatLimit="marquee_forever"
@@ -109,7 +108,6 @@
                     android:layout_height="wrap_content"
                     android:textColor="@color/green_dim"
                     android:textSize="10sp"
-                    android:fontFamily="monospace"
                     android:maxLines="1"
                     android:ellipsize="end"
                     android:visibility="gone"
@@ -118,6 +116,14 @@
             </LinearLayout>
 
         </LinearLayout>
+
+        <com.example.media_player.SignalPathView
+            android:id="@+id/signal_path_view"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:visibility="gone"
+            android:layout_marginTop="6dp"
+            android:layout_marginBottom="2dp" />
 
         <LinearLayout
             android:layout_width="match_parent"

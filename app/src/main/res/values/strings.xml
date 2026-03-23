@@ -29,7 +29,7 @@
 
     <string name="setting_bt_codec">Bluetooth Codec</string>
     <string name="setting_bt_codec_desc">Per-device A2DP codec configuration</string>
-    <string name="setting_bt_codec_unavailable">Grant ADB permission to enable</string>
+    <string name="setting_bt_codec_unavailable">Not available on this device</string>
     <string name="bt_codec_title">Bluetooth Codec</string>
     <string name="bt_codec_active_device">Active Device</string>
     <string name="bt_codec_no_active">No A2DP device connected</string>
@@ -58,6 +58,11 @@
     <string name="bt_codec_applied_unverified">Codec change sent (unverified)</string>
     <string name="bt_codec_current_unknown">Codec status unavailable</string>
     <string name="bt_codec_method_ready">Permission granted -- codec switching enabled</string>
+    <string name="bt_codec_cdm_title">Device association required</string>
+    <string name="bt_codec_cdm_body">Tap a device and apply to associate it with Matrix Player. This grants codec control without ADB.</string>
+    <string name="bt_codec_needs_association">Associate device to see codec status</string>
+    <string name="bt_codec_associating">Requesting device association...</string>
+    <string name="bt_codec_association_failed">Association failed: %s</string>
 
     <string name="setting_music_folders">Music folders</string>
     <string name="setting_music_folders_empty">No folders configured</string>
@@ -65,4 +70,31 @@
     <string name="setting_add_folder_hint">Folder path (e.g. /storage/emulated/0/Music)</string>
     <string name="setting_folder_not_found">Folder not found</string>
     <string name="no_folders_configured">No music folders configured -- add folders in Settings</string>
+
+    <string name="tab_tidal">TIDAL</string>
+    <string name="tidal_login_title">TIDAL</string>
+    <string name="tidal_login_instructions">Enter the code below at the URL shown to connect your TIDAL account</string>
+    <string name="tidal_login">Connect TIDAL</string>
+    <string name="tidal_connecting">Connecting...</string>
+    <string name="tidal_waiting_auth">Waiting for authorization...</string>
+    <string name="tidal_login_failed">Login failed -- try again</string>
+    <string name="tidal_albums">Albums</string>
+    <string name="tidal_playlists">Playlists</string>
+    <string name="tidal_favorites">Favorite Tracks</string>
+    <string name="tidal_search">Search</string>
+    <string name="tidal_search_hint">Search albums...</string>
+    <string name="tidal_cancel">\u00D7</string>
+    <string name="tidal_logout">Logout</string>
+    <string name="tidal_loading">Loading...</string>
+    <string name="tidal_error">Request failed</string>
+    <string name="tidal_stream_error">Could not play TIDAL stream</string>
+    <string name="setting_tidal_quality">TIDAL audio quality</string>
+    <string name="setting_tidal_quality_desc">SMART auto-selects based on output (USB DAC: hi-res lossless, LDAC: lossless, AAC/SBC: high). Manual: HI_RES_LOSSLESS | LOSSLESS | HIGH | LOW</string>
+
+    <string name="lyrics_no_lyrics">No lyrics available</string>
+
+    <string name="signal_path_source">SOURCE</string>
+    <string name="signal_path_decode">DECODE</string>
+    <string name="signal_path_output">OUTPUT</string>
+    <string name="signal_path_bit_perfect">[BIT-PERFECT]</string>
 </resources>

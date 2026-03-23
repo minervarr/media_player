@@ -67,8 +67,14 @@ public class TrackAdapter extends RecyclerView.Adapter<TrackAdapter.ViewHolder> 
 
         holder.tvDuration.setText(track.getFormattedDuration());
 
+        String artworkKey;
+        if (track.source == Track.Source.TIDAL && track.artworkUrl != null) {
+            artworkKey = "tidal:" + track.artworkUrl;
+        } else {
+            artworkKey = "album:" + track.albumId;
+        }
         ArtworkCache.getInstance(holder.ivArtwork.getContext())
-                .loadArtwork("album:" + track.albumId, holder.ivArtwork, 120);
+                .loadArtwork(artworkKey, holder.ivArtwork, 120);
 
         holder.itemView.setOnClickListener(v -> {
             int pos = holder.getAdapterPosition();

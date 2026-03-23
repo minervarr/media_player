@@ -1,7 +1,7 @@
 package com.example.media_player;
 
 public interface AudioOutput {
-    boolean configure(int sampleRate, int channelCount, int encoding);
+    boolean configure(int sampleRate, int channelCount, int encoding, int sourceBitDepth);
     boolean start();
     int write(byte[] data, int offset, int length);
     void pause();

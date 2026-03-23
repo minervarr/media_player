@@ -15,6 +15,7 @@ public class UsbAudioNative {
     public static native void nativeFlush(long handle);
     public static native int nativeGetConfiguredBitDepth(long handle);
     public static native int nativeWriteFloat32(long handle, byte[] data, int offset, int length);
+    public static native int nativeWriteInt16(long handle, byte[] data, int offset, int length);
     public static native int nativeGetUacVersion(long handle);
     public static native String nativeGetDeviceInfo(long handle);
     public static native void nativeClose(long handle);

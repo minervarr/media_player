@@ -15,6 +15,9 @@ public class AppSettings {
     private static final String KEY_ARTWORK_KEEP_SCREEN_ON = "artwork_keep_screen_on";
     private static final String KEY_USB_EXCLUSIVE_MODE = "usb_exclusive_mode";
     private static final String KEY_MUSIC_FOLDERS = "music_folders";
+    private static final String KEY_TIDAL_AUDIO_QUALITY = "tidal_audio_quality";
+    private static final String KEY_SIGNAL_PATH_MODE = "signal_path_mode";
+    private static final String KEY_LYRICS_ENABLED = "lyrics_enabled";
 
     private final SharedPreferences prefs;
 
@@ -56,5 +59,31 @@ public class AppSettings {
     public void setMusicFolders(Set<String> folders) {
         Log.d(TAG, "setMusicFolders: " + folders.size() + " folders");
         prefs.edit().putStringSet(KEY_MUSIC_FOLDERS, folders).apply();
+    }
+
+    public String getTidalAudioQuality() {
+        return prefs.getString(KEY_TIDAL_AUDIO_QUALITY, "HI_RES_LOSSLESS");
+    }
+
+    public void setTidalAudioQuality(String quality) {
+        Log.d(TAG, "setTidalAudioQuality: " + quality);
+        prefs.edit().putString(KEY_TIDAL_AUDIO_QUALITY, quality).apply();
+    }
+
+    public int getSignalPathMode() {
+        return prefs.getInt(KEY_SIGNAL_PATH_MODE, 0);
+    }
+
+    public void setSignalPathMode(int mode) {
+        prefs.edit().putInt(KEY_SIGNAL_PATH_MODE, mode).apply();
+    }
+
+    public boolean isLyricsEnabled() {
+        return prefs.getBoolean(KEY_LYRICS_ENABLED, true);
+    }
+
+    public void setLyricsEnabled(boolean enabled) {
+        Log.d(TAG, "setLyricsEnabled: " + enabled);
+        prefs.edit().putBoolean(KEY_LYRICS_ENABLED, enabled).apply();
     }
 }

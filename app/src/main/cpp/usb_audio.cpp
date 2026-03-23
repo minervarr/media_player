@@ -751,6 +751,14 @@ bool UsbAudioDriver::start() {
 
 int UsbAudioDriver::write(const uint8_t* data, int length) {
     if (!streaming.load() || !ringBuffer) return -1;
+    // Align write to frame boundary to prevent sample misalignment in ring buffer
+    int bytesPerFrame = (configuredBitDepth / 8) * configuredChannels;
+    if (bytesPerFrame > 0) {
+        size_t space = ringBuffer->getFreeSpace();
+        int aligned = ((int)space / bytesPerFrame) * bytesPerFrame;
+        if (aligned <= 0) return 0;
+        length = std::min(length, aligned);
+    }
     return (int)ringBuffer->write(data, length);
 }
 
@@ -767,11 +775,14 @@ int UsbAudioDriver::writeFloat32(const float* data, int numSamples) {
     while (totalConsumed < numSamples) {
         int batch = std::min(CHUNK, numSamples - totalConsumed);
 
-        // Check ring buffer space before converting
-        size_t space = ringBuffer->getAvailable();
-        // getAvailable returns data available to read; we need free space
-        // RingBuffer capacity not exposed, but write() returns actual written
-        // Just convert a batch and write, the ring buffer handles backpressure
+        // Pre-check free space and limit batch to what fits, aligned to sample size.
+        // This prevents partial-sample writes that corrupt frame alignment.
+        // getFreeSpace() is a lower bound (reader may free more), so the
+        // subsequent write is guaranteed to accept the full batch.
+        size_t space = ringBuffer->getFreeSpace();
+        int fitSamples = (int)(space / bytesPerSample);
+        if (fitSamples <= 0) break;
+        batch = std::min(batch, fitSamples);
 
         int outBytes = 0;
 
@@ -818,6 +829,74 @@ int UsbAudioDriver::writeFloat32(const float* data, int numSamples) {
 
         if (samplesWritten < batch) {
             break; // ring buffer full, return what we consumed
+        }
+    }
+
+    return totalConsumed;
+}
+
+int UsbAudioDriver::writeInt16(const int16_t* data, int numSamples) {
+    if (!streaming.load() || !ringBuffer) return -1;
+
+    int bytesPerSample = configuredBitDepth / 8;
+
+    // Convert in chunks to avoid large stack allocation
+    const int CHUNK = 512;
+    uint8_t convBuf[CHUNK * 4]; // max 4 bytes per sample (32-bit)
+    int totalConsumed = 0;
+
+    while (totalConsumed < numSamples) {
+        int batch = std::min(CHUNK, numSamples - totalConsumed);
+
+        // Pre-check free space and limit batch to what fits, aligned to sample size.
+        size_t space = ringBuffer->getFreeSpace();
+        int fitSamples = (int)(space / bytesPerSample);
+        if (fitSamples <= 0) break;
+        batch = std::min(batch, fitSamples);
+
+        int outBytes = 0;
+
+        for (int i = 0; i < batch; i++) {
+            int16_t s = data[totalConsumed + i];
+
+            switch (configuredBitDepth) {
+                case 16: {
+                    // Bit-perfect passthrough
+                    convBuf[outBytes++] = s & 0xFF;
+                    convBuf[outBytes++] = (s >> 8) & 0xFF;
+                    break;
+                }
+                case 24: {
+                    // Shift left 8 to place 16-bit data in upper bits of 24-bit
+                    int32_t v = (int32_t)s << 8;
+                    convBuf[outBytes++] = v & 0xFF;
+                    convBuf[outBytes++] = (v >> 8) & 0xFF;
+                    convBuf[outBytes++] = (v >> 16) & 0xFF;
+                    break;
+                }
+                case 32: {
+                    // Shift left 16 to place 16-bit data in upper bits of 32-bit
+                    int32_t v = (int32_t)s << 16;
+                    convBuf[outBytes++] = v & 0xFF;
+                    convBuf[outBytes++] = (v >> 8) & 0xFF;
+                    convBuf[outBytes++] = (v >> 16) & 0xFF;
+                    convBuf[outBytes++] = (v >> 24) & 0xFF;
+                    break;
+                }
+                default: {
+                    convBuf[outBytes++] = s & 0xFF;
+                    convBuf[outBytes++] = (s >> 8) & 0xFF;
+                    break;
+                }
+            }
+        }
+
+        int written = (int)ringBuffer->write(convBuf, outBytes);
+        int samplesWritten = written / bytesPerSample;
+        totalConsumed += samplesWritten;
+
+        if (samplesWritten < batch) {
+            break; // ring buffer full
         }
     }
 

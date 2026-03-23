@@ -10,6 +10,7 @@ import android.widget.TextView;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.fragment.app.Fragment;
+import androidx.recyclerview.widget.DefaultItemAnimator;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
@@ -44,6 +45,13 @@ public class TracksFragment extends Fragment implements PlaybackObserver, TrackA
         adapter = new TrackAdapter(tracks, this);
         recyclerView.setLayoutManager(new LinearLayoutManager(requireContext()));
         recyclerView.setAdapter(adapter);
+
+        DefaultItemAnimator animator = new DefaultItemAnimator();
+        animator.setAddDuration(150);
+        animator.setRemoveDuration(150);
+        animator.setMoveDuration(150);
+        animator.setChangeDuration(150);
+        recyclerView.setItemAnimator(animator);
 
         loadData();
     }

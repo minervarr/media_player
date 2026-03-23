@@ -11,6 +11,7 @@
     <color name="text_primary">#E0E0E0</color>
     <color name="text_secondary">#757575</color>
     <color name="text_playing">#00E676</color>
+    <color name="amber_conversion">#FFB300</color>
     <color name="divider">#1A1A1A</color>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>

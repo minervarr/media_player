@@ -1,16 +1,22 @@
 package com.example.media_player;
 
 import android.annotation.SuppressLint;
+import android.app.Activity;
 import android.bluetooth.BluetoothA2dp;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothCodecConfig;
 import android.bluetooth.BluetoothCodecStatus;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothProfile;
+import android.companion.AssociationInfo;
+import android.companion.AssociationRequest;
+import android.companion.BluetoothDeviceFilter;
+import android.companion.CompanionDeviceManager;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.IntentSender;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Handler;
@@ -21,6 +27,7 @@ import android.util.Log;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
 import java.util.List;
+import java.util.concurrent.Executor;
 
 public class BluetoothCodecManager {
 
@@ -34,6 +41,14 @@ public class BluetoothCodecManager {
         void onCodecConfigFailed(BluetoothDevice device, String reason);
         void onCodecConfigAppliedUnverified(BluetoothDevice device);
     }
+
+    public interface AssociationCallback {
+        void onAssociated();
+        void onFailed(String reason);
+    }
+
+    // Request code for pre-API 33 CDM intent sender result
+    public static final int CDM_ASSOCIATE_REQUEST_CODE = 7001;
 
     private final Context context;
     private final BluetoothCodecSettings codecSettings;
@@ -134,7 +149,12 @@ public class BluetoothCodecManager {
     }
 
     public static boolean isFeatureAvailable(Context context) {
-        return probeReflection() || hasWriteSecureSettings(context);
+        return probeReflection() || hasWriteSecureSettings(context) || isCdmAvailable(context);
+    }
+
+    public static boolean isCdmAvailable(Context context) {
+        return context.getPackageManager()
+                .hasSystemFeature("android.software.companion_device_setup");
     }
 
     public static boolean hasWriteSecureSettings(Context context) {
@@ -342,30 +362,69 @@ public class BluetoothCodecManager {
         }
     }
 
-    private boolean invokeSetCodecConfigPreference(BluetoothDevice device,
-                                                   BluetoothCodecConfig config) {
+    public static final int SET_RESULT_OK = 0;
+    public static final int SET_RESULT_FAILED = 1;
+    public static final int SET_RESULT_SECURITY = 2;
+
+    private int invokeSetCodecConfigPreferenceResult(BluetoothDevice device,
+                                                      BluetoothCodecConfig config) {
         try {
             Method method = BluetoothA2dp.class.getMethod(
                     "setCodecConfigPreference", BluetoothDevice.class, BluetoothCodecConfig.class);
             method.invoke(a2dpProxy, device, config);
             Log.d(TAG, "Reflection setCodecConfigPreference call completed");
-            return true;
+            return SET_RESULT_OK;
         } catch (Exception e) {
+            Throwable cause = e.getCause();
+            if (cause instanceof SecurityException) {
+                Log.w(TAG, "setCodecConfigPreference: CDM association required", cause);
+                return SET_RESULT_SECURITY;
+            }
             Log.e(TAG, "setCodecConfigPreference reflection failed", e);
-            return false;
+            return SET_RESULT_FAILED;
+        }
+    }
+
+    private boolean invokeSetCodecConfigPreference(BluetoothDevice device,
+                                                   BluetoothCodecConfig config) {
+        return invokeSetCodecConfigPreferenceResult(device, config) == SET_RESULT_OK;
+    }
+
+    /**
+     * Result holder for getCodecStatus that distinguishes "null result" from
+     * "SecurityException thrown" so callers can show appropriate UI.
+     */
+    public static class CodecStatusResult {
+        public final BluetoothCodecStatus status;
+        public final boolean securityException;
+
+        CodecStatusResult(BluetoothCodecStatus status, boolean securityException) {
+            this.status = status;
+            this.securityException = securityException;
+        }
+    }
+
+    public CodecStatusResult invokeGetCodecStatusResult(BluetoothDevice device) {
+        if (a2dpProxy == null) return new CodecStatusResult(null, false);
+        try {
+            Method method = BluetoothA2dp.class.getMethod(
+                    "getCodecStatus", BluetoothDevice.class);
+            BluetoothCodecStatus status =
+                    (BluetoothCodecStatus) method.invoke(a2dpProxy, device);
+            return new CodecStatusResult(status, false);
+        } catch (Exception e) {
+            Throwable cause = e.getCause();
+            if (cause instanceof SecurityException) {
+                Log.w(TAG, "getCodecStatus: CDM association required", cause);
+                return new CodecStatusResult(null, true);
+            }
+            Log.e(TAG, "getCodecStatus reflection failed", e);
+            return new CodecStatusResult(null, false);
         }
     }
 
     public BluetoothCodecStatus invokeGetCodecStatus(BluetoothDevice device) {
-        if (a2dpProxy == null) return null;
-        try {
-            Method method = BluetoothA2dp.class.getMethod(
-                    "getCodecStatus", BluetoothDevice.class);
-            return (BluetoothCodecStatus) method.invoke(a2dpProxy, device);
-        } catch (Exception e) {
-            Log.e(TAG, "getCodecStatus reflection failed", e);
-            return null;
-        }
+        return invokeGetCodecStatusResult(device).status;
     }
 
     private static boolean probeReflection() {
@@ -378,6 +437,120 @@ public class BluetoothCodecManager {
         } catch (NoSuchMethodException e) {
             Log.w(TAG, "Hidden API methods not available");
             return false;
+        }
+    }
+
+    // --- Companion Device Manager (CDM) association ---
+
+    @SuppressLint("MissingPermission")
+    public boolean hasAssociation(Context ctx, String mac) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return false;
+
+        CompanionDeviceManager cdm = ctx.getSystemService(CompanionDeviceManager.class);
+        if (cdm == null) return false;
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            // API 33+: getMyAssociations() returns List<AssociationInfo>
+            List<AssociationInfo> associations = cdm.getMyAssociations();
+            for (AssociationInfo info : associations) {
+                String assocMac = info.getDeviceMacAddress() != null
+                        ? info.getDeviceMacAddress().toString().toUpperCase()
+                        : null;
+                if (mac.equalsIgnoreCase(assocMac)) return true;
+            }
+        } else {
+            // API 26-32: getAssociations() returns List<String> (MAC addresses)
+            @SuppressWarnings("deprecation")
+            List<String> associations = cdm.getAssociations();
+            for (String assocMac : associations) {
+                if (mac.equalsIgnoreCase(assocMac)) return true;
+            }
+        }
+        return false;
+    }
+
+    @SuppressLint("MissingPermission")
+    public void requestAssociation(Activity activity, BluetoothDevice device,
+                                    AssociationCallback callback) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            callback.onFailed("CDM requires Android 8.0+");
+            return;
+        }
+
+        CompanionDeviceManager cdm = activity.getSystemService(CompanionDeviceManager.class);
+        if (cdm == null) {
+            callback.onFailed("CompanionDeviceManager not available");
+            return;
+        }
+
+        BluetoothDeviceFilter filter = new BluetoothDeviceFilter.Builder()
+                .setAddress(device.getAddress())
+                .build();
+
+        AssociationRequest request = new AssociationRequest.Builder()
+                .addDeviceFilter(filter)
+                .setSingleDevice(true)
+                .build();
+
+        Log.d(TAG, "requestAssociation: starting for " + device.getAddress()
+                + " (API " + Build.VERSION.SDK_INT + ")");
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            // API 33+: executor-based callback
+            Executor mainExecutor = activity.getMainExecutor();
+            try {
+                cdm.associate(request, mainExecutor, new CompanionDeviceManager.Callback() {
+                    @Override
+                    public void onAssociationPending(IntentSender intentSender) {
+                        // System needs user consent -- launch the dialog
+                        Log.d(TAG, "CDM onAssociationPending: launching consent dialog");
+                        try {
+                            activity.startIntentSenderForResult(intentSender,
+                                    CDM_ASSOCIATE_REQUEST_CODE, null, 0, 0, 0);
+                        } catch (IntentSender.SendIntentException e) {
+                            Log.e(TAG, "CDM intent sender failed", e);
+                            callback.onFailed("Could not launch association dialog");
+                        }
+                    }
+
+                    @Override
+                    public void onAssociationCreated(AssociationInfo info) {
+                        Log.d(TAG, "CDM association created: " + info);
+                        callback.onAssociated();
+                    }
+
+                    @Override
+                    public void onFailure(CharSequence error) {
+                        Log.w(TAG, "CDM association failed: " + error);
+                        callback.onFailed(error != null ? error.toString() : "Association failed");
+                    }
+                });
+            } catch (Exception e) {
+                Log.e(TAG, "cdm.associate() threw", e);
+                callback.onFailed("CDM associate failed: " + e.getMessage());
+            }
+        } else {
+            // API 26-32: handler-based callback, launches IntentSender
+            @SuppressWarnings("deprecation")
+            CompanionDeviceManager.Callback cdmCallback = new CompanionDeviceManager.Callback() {
+                @Override
+                public void onDeviceFound(IntentSender chooserLauncher) {
+                    try {
+                        activity.startIntentSenderForResult(chooserLauncher,
+                                CDM_ASSOCIATE_REQUEST_CODE, null, 0, 0, 0);
+                    } catch (IntentSender.SendIntentException e) {
+                        Log.e(TAG, "CDM intent sender failed", e);
+                        callback.onFailed("Could not launch association dialog");
+                    }
+                }
+
+                @Override
+                public void onFailure(CharSequence error) {
+                    Log.w(TAG, "CDM association failed: " + error);
+                    callback.onFailed(error != null ? error.toString() : "Association failed");
+                }
+            };
+            cdm.associate(request, cdmCallback, handler);
         }
     }
 }

@@ -8,5 +8,7 @@
         <item name="colorOnSecondary">@color/black</item>
         <item name="android:windowBackground">@color/bg_primary</item>
         <item name="android:statusBarColor">@color/bg_surface</item>
+        <item name="android:fontFamily">@font/cmu_serif</item>
+        <item name="fontFamily">@font/cmu_serif</item>
     </style>
 </resources>

@@ -2,6 +2,7 @@ package com.example.media_player;
 
 import android.Manifest;
 import android.annotation.SuppressLint;
+import android.app.Activity;
 import android.bluetooth.BluetoothA2dp;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothCodecConfig;
@@ -10,6 +11,7 @@ import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothProfile;
 import android.content.ClipData;
 import android.content.ClipboardManager;
+import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
@@ -45,10 +47,17 @@ public class BluetoothCodecActivity extends AppCompatActivity
     private TextView tvActiveDeviceName;
     private TextView tvActiveDeviceCodec;
 
+    private boolean permissionGranted;
+    private boolean proxyReady;
+
+    // Pending CDM association callback (for pre-API 33 flow)
+    private BluetoothCodecManager.AssociationCallback pendingCdmCallback;
+
     private final ActivityResultLauncher<String> permissionLauncher =
             registerForActivityResult(new ActivityResultContracts.RequestPermission(), granted -> {
                 if (granted) {
-                    loadDevices();
+                    permissionGranted = true;
+                    loadDevicesIfReady();
                 } else {
                     Toast.makeText(this, R.string.bt_codec_permission_required,
                             Toast.LENGTH_SHORT).show();
@@ -72,7 +81,10 @@ public class BluetoothCodecActivity extends AppCompatActivity
         codecSettings = new BluetoothCodecSettings(this);
         codecManager = new BluetoothCodecManager(this);
         codecManager.setListener(this);
-        codecManager.setOnProxyReady(() -> loadDevices());
+        codecManager.setOnProxyReady(() -> {
+            proxyReady = true;
+            loadDevicesIfReady();
+        });
         codecManager.register();
         bluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
 
@@ -101,19 +113,43 @@ public class BluetoothCodecActivity extends AppCompatActivity
     }
 
     private void setupPermissionBanner() {
-        if (BluetoothCodecManager.hasWriteSecureSettings(this)) {
-            // Permission granted -- show brief "enabled" message
+        TextView tvTitle = findViewById(R.id.tv_banner_title);
+        TextView tvBody = findViewById(R.id.tv_banner_body);
+        View tvCommand = findViewById(R.id.tv_banner_command);
+        TextView tvCopy = findViewById(R.id.tv_banner_copy);
+
+        if (BluetoothCodecManager.isCdmAvailable(this)) {
+            // CDM is the primary path. Check if the active device already has an association.
+            boolean activeAssociated = isActiveDeviceAssociated();
+            if (activeAssociated) {
+                // Association exists -- show "enabled"
+                permissionBanner.setVisibility(View.VISIBLE);
+                tvTitle.setText(R.string.bt_codec_method_ready);
+                tvTitle.setTextColor(getColor(R.color.green_bright));
+                tvBody.setVisibility(View.GONE);
+                tvCommand.setVisibility(View.GONE);
+                tvCopy.setVisibility(View.GONE);
+            } else {
+                // CDM available but no association yet -- instruct user
+                permissionBanner.setVisibility(View.VISIBLE);
+                tvTitle.setText(R.string.bt_codec_cdm_title);
+                tvTitle.setTextColor(getColor(R.color.text_primary));
+                tvBody.setText(R.string.bt_codec_cdm_body);
+                tvBody.setVisibility(View.VISIBLE);
+                tvCommand.setVisibility(View.GONE);
+                tvCopy.setVisibility(View.GONE);
+            }
+        } else if (BluetoothCodecManager.hasWriteSecureSettings(this)) {
+            // ADB permission granted, no CDM
             permissionBanner.setVisibility(View.VISIBLE);
-            TextView tvTitle = findViewById(R.id.tv_banner_title);
             tvTitle.setText(R.string.bt_codec_method_ready);
             tvTitle.setTextColor(getColor(R.color.green_bright));
-            findViewById(R.id.tv_banner_body).setVisibility(View.GONE);
-            findViewById(R.id.tv_banner_command).setVisibility(View.GONE);
-            findViewById(R.id.tv_banner_copy).setVisibility(View.GONE);
+            tvBody.setVisibility(View.GONE);
+            tvCommand.setVisibility(View.GONE);
+            tvCopy.setVisibility(View.GONE);
         } else {
-            // Permission not granted -- show ADB instructions
+            // No CDM, no ADB -- show ADB instructions as fallback
             permissionBanner.setVisibility(View.VISIBLE);
-            TextView tvCopy = findViewById(R.id.tv_banner_copy);
             tvCopy.setOnClickListener(v -> {
                 String command = getString(R.string.bt_codec_adb_command);
                 ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
@@ -121,6 +157,15 @@ public class BluetoothCodecActivity extends AppCompatActivity
                 Toast.makeText(this, R.string.bt_codec_copied, Toast.LENGTH_SHORT).show();
             });
         }
+    }
+
+    @SuppressLint("MissingPermission")
+    private boolean isActiveDeviceAssociated() {
+        BluetoothA2dp proxy = codecManager.getA2dpProxy();
+        if (proxy == null) return false;
+        List<BluetoothDevice> connected = proxy.getConnectedDevices();
+        if (connected == null || connected.isEmpty()) return false;
+        return codecManager.hasAssociation(this, connected.get(0).getAddress());
     }
 
     private void requestBluetoothPermission() {
@@ -131,7 +176,14 @@ public class BluetoothCodecActivity extends AppCompatActivity
                 return;
             }
         }
-        loadDevices();
+        permissionGranted = true;
+        loadDevicesIfReady();
+    }
+
+    private void loadDevicesIfReady() {
+        if (permissionGranted && proxyReady) {
+            loadDevices();
+        }
     }
 
     @SuppressLint("MissingPermission")
@@ -172,9 +224,18 @@ public class BluetoothCodecActivity extends AppCompatActivity
         tvActiveDeviceName.setText(active.getName() != null ? active.getName() : active.getAddress());
 
         // Try getting codec status via reflection first
-        BluetoothCodecStatus status = codecManager.invokeGetCodecStatus(active);
-        if (status != null) {
-            BluetoothCodecConfig current = status.getCodecConfig();
+        BluetoothCodecManager.CodecStatusResult result =
+                codecManager.invokeGetCodecStatusResult(active);
+
+        if (result.securityException) {
+            // CDM association needed for this device
+            tvActiveDeviceCodec.setText(R.string.bt_codec_needs_association);
+            tvActiveDeviceCodec.setVisibility(View.VISIBLE);
+            return;
+        }
+
+        if (result.status != null) {
+            BluetoothCodecConfig current = result.status.getCodecConfig();
             if (current != null) {
                 String codecInfo = describeCodecConfig(current);
                 tvActiveDeviceCodec.setText(getString(R.string.bt_codec_current, codecInfo));
@@ -312,14 +373,14 @@ public class BluetoothCodecActivity extends AppCompatActivity
             loadDevices();
         });
 
-        // Apply Now button
+        // Apply Now button -- triggers CDM association if needed before applying
         dialogView.findViewById(R.id.btn_apply_now).setOnClickListener(v -> {
             BluetoothDeviceCodecConfig newConfig = buildConfigFromDialog(
                     spinnerCodec, spinnerSampleRate, spinnerBitDepth, spinnerLdacQuality);
             newConfig.deviceName = name;
             codecSettings.saveDeviceConfig(mac, newConfig);
-            codecManager.applyConfig(device, newConfig, true);
             dialog.dismiss();
+            applyWithAssociationIfNeeded(device, newConfig);
         });
 
         // Remove button
@@ -470,6 +531,76 @@ public class BluetoothCodecActivity extends AppCompatActivity
         }
 
         return codec + " / " + rate + " / " + bits;
+    }
+
+    @SuppressLint("MissingPermission")
+    private void applyWithAssociationIfNeeded(BluetoothDevice device,
+                                               BluetoothDeviceCodecConfig config) {
+        String mac = device.getAddress();
+
+        // Test if codec APIs actually work for this device by probing getCodecStatus.
+        // On Android 16, even WRITE_SECURE_SETTINGS is not enough -- CDM is required.
+        boolean needsCdm = false;
+        BluetoothCodecManager.CodecStatusResult probe =
+                codecManager.invokeGetCodecStatusResult(device);
+        if (probe.securityException) {
+            needsCdm = true;
+        }
+
+        if (!needsCdm) {
+            // Codec APIs work (either WRITE_SECURE_SETTINGS or existing CDM association)
+            codecManager.applyConfig(device, config, true);
+            return;
+        }
+
+        // CDM association required
+        if (!BluetoothCodecManager.isCdmAvailable(this)) {
+            // No CDM support -- try applying anyway (will likely fail)
+            codecManager.applyConfig(device, config, true);
+            return;
+        }
+
+        Toast.makeText(this, R.string.bt_codec_associating, Toast.LENGTH_SHORT).show();
+
+        BluetoothCodecManager.AssociationCallback callback =
+                new BluetoothCodecManager.AssociationCallback() {
+            @Override
+            public void onAssociated() {
+                codecManager.applyConfig(device, config, true);
+                setupPermissionBanner();
+                loadDevices();
+            }
+
+            @Override
+            public void onFailed(String reason) {
+                Toast.makeText(BluetoothCodecActivity.this,
+                        getString(R.string.bt_codec_association_failed, reason),
+                        Toast.LENGTH_LONG).show();
+            }
+        };
+
+        // Store for pre-API 33 onActivityResult path
+        pendingCdmCallback = callback;
+        codecManager.requestAssociation(this, device, callback);
+    }
+
+    @Override
+    @SuppressWarnings("deprecation")
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == BluetoothCodecManager.CDM_ASSOCIATE_REQUEST_CODE) {
+            if (resultCode == Activity.RESULT_OK) {
+                if (pendingCdmCallback != null) {
+                    pendingCdmCallback.onAssociated();
+                    pendingCdmCallback = null;
+                }
+            } else {
+                if (pendingCdmCallback != null) {
+                    pendingCdmCallback.onFailed("User denied association");
+                    pendingCdmCallback = null;
+                }
+            }
+        }
     }
 
     @Override

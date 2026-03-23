@@ -99,6 +99,25 @@ Java_com_example_media_1player_UsbAudioNative_nativeWriteFloat32(JNIEnv* env, jc
 }
 
 JNIEXPORT jint JNICALL
+Java_com_example_media_1player_UsbAudioNative_nativeWriteInt16(JNIEnv* env, jclass,
+        jlong handle, jbyteArray data, jint offset, jint length) {
+    auto* driver = reinterpret_cast<UsbAudioDriver*>(handle);
+    if (!driver) return -1;
+
+    jbyte* bytes = env->GetByteArrayElements(data, nullptr);
+    if (!bytes) return -1;
+
+    int numSamples = length / 2; // 2 bytes per int16 sample
+    const int16_t* samples = reinterpret_cast<const int16_t*>(bytes + offset);
+    int consumed = driver->writeInt16(samples, numSamples);
+
+    env->ReleaseByteArrayElements(data, bytes, JNI_ABORT);
+
+    // Return bytes consumed (not samples)
+    return consumed * 2;
+}
+
+JNIEXPORT jint JNICALL
 Java_com_example_media_1player_UsbAudioNative_nativeGetConfiguredBitDepth(JNIEnv*, jclass, jlong handle) {
     auto* driver = reinterpret_cast<UsbAudioDriver*>(handle);
     return driver ? driver->getConfiguredBitDepth() : 0;

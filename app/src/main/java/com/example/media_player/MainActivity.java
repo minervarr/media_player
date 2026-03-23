@@ -1,29 +1,32 @@
 package com.example.media_player;
 
 import android.Manifest;
+import android.content.ComponentName;
+import android.content.Context;
 import android.content.Intent;
+import android.content.ServiceConnection;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.bluetooth.BluetoothDevice;
-import android.hardware.usb.UsbDevice;
-import android.hardware.usb.UsbDeviceConnection;
-import android.media.AudioAttributes;
 import android.media.AudioDeviceInfo;
-import android.media.AudioFormat;
-import android.media.AudioFocusRequest;
 import android.media.AudioManager;
 import android.media.MediaMetadataRetriever;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
+import android.os.IBinder;
 import android.os.Looper;
 import android.util.Log;
+import android.transition.Fade;
+import android.transition.TransitionManager;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
+import android.view.ViewGroup;
 import android.widget.SeekBar;
 import android.widget.Toast;
 
+import androidx.annotation.NonNull;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
@@ -34,8 +37,12 @@ import androidx.core.view.WindowInsetsControllerCompat;
 import androidx.fragment.app.Fragment;
 import androidx.fragment.app.FragmentManager;
 import androidx.fragment.app.FragmentTransaction;
+import androidx.interpolator.view.animation.FastOutSlowInInterpolator;
 
 import com.example.media_player.databinding.ActivityMainBinding;
+import com.example.media_player.tidal.TidalAuth;
+import com.example.media_player.tidal.TidalFragment;
+import com.example.media_player.tidal.TidalModels;
 import com.google.android.material.tabs.TabLayout;
 
 import java.io.File;
@@ -43,18 +50,17 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
 public class MainActivity extends AppCompatActivity
-        implements TrackDataProvider, UsbAudioManager.UsbAudioListener,
-        BluetoothCodecManager.BluetoothCodecListener {
+        implements TrackDataProvider,
+        BluetoothCodecManager.BluetoothCodecListener,
+        MusicService.PlaybackCallback {
 
     private static final String TAG = "MatrixPlayer";
 
@@ -64,35 +70,44 @@ public class MainActivity extends AppCompatActivity
 
     private ActivityMainBinding binding;
     private final List<Track> tracks = new ArrayList<>();
-    private AudioEngine audioEngine;
     private boolean isUserSeeking = false;
 
-    private List<Track> currentQueue = new ArrayList<>();
-    private int currentQueueIndex = -1;
-    private long playingTrackId = -1;
-
-    private final Fragment[] fragments = new Fragment[7];
+    private final Fragment[] fragments = new Fragment[8];
     private int currentTabIndex = 0;
 
     private AppSettings settings;
     private BluetoothCodecManager bluetoothCodecManager;
-    private UsbAudioManager usbAudioManager;
-    private UsbDeviceConnection usbConnection;
-    private boolean usbOutputActive;
-
-    private final ExecutorService usbExecutor = Executors.newSingleThreadExecutor();
-
     private AudioManager audioManager;
-    private AudioFocusRequest audioFocusRequest;
-    private boolean hasAudioFocus;
-    private boolean pausedByFocusLoss;
+
+    private int signalPathMode;
+
+    private MusicService.PlaybackController playbackController;
+    private boolean serviceBound;
+
+    private final ServiceConnection serviceConnection = new ServiceConnection() {
+        @Override
+        public void onServiceConnected(ComponentName name, IBinder service) {
+            Log.d(TAG, "onServiceConnected");
+            playbackController = (MusicService.PlaybackController) service;
+            serviceBound = true;
+            playbackController.setCallback(MainActivity.this);
+            restoreUiFromService();
+        }
+
+        @Override
+        public void onServiceDisconnected(ComponentName name) {
+            Log.d(TAG, "onServiceDisconnected");
+            playbackController = null;
+            serviceBound = false;
+        }
+    };
 
     private final Handler seekHandler = new Handler(Looper.getMainLooper());
     private final Runnable seekUpdater = new Runnable() {
         @Override
         public void run() {
-            if (audioEngine != null && audioEngine.isPlaying() && !isUserSeeking) {
-                int pos = audioEngine.getCurrentPosition();
+            if (playbackController != null && playbackController.isPlaying() && !isUserSeeking) {
+                int pos = playbackController.getCurrentPosition();
                 binding.seekbar.setProgress(pos);
                 binding.tvCurrentTime.setText(formatTime(pos));
             }
@@ -124,23 +139,64 @@ public class MainActivity extends AppCompatActivity
         setContentView(binding.getRoot());
 
         settings = new AppSettings(this);
+        signalPathMode = settings.getSignalPathMode();
         audioManager = (AudioManager) getSystemService(AUDIO_SERVICE);
 
         enableFullscreen();
         setSupportActionBar(binding.toolbar);
 
         setupTabs();
+        if (savedInstanceState != null) {
+            int restored = savedInstanceState.getInt("tab_index", 0);
+            if (restored > 0 && restored < fragments.length) {
+                binding.tabLayout.getTabAt(restored).select();
+            }
+        }
         setupPlayerControls();
         checkPermissionAndLoad();
-
-        usbAudioManager = new UsbAudioManager(this);
-        usbAudioManager.setListener(this);
-        usbAudioManager.register();
 
         if (BluetoothCodecManager.isFeatureAvailable(this)) {
             bluetoothCodecManager = new BluetoothCodecManager(this);
             bluetoothCodecManager.setListener(this);
             bluetoothCodecManager.register();
+        }
+    }
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        Log.d(TAG, "onStart: binding to MusicService");
+        Intent intent = new Intent(this, MusicService.class);
+        bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE);
+    }
+
+    @Override
+    protected void onStop() {
+        Log.d(TAG, "onStop: unbinding from MusicService");
+        if (serviceBound) {
+            if (playbackController != null) {
+                playbackController.setCallback(null);
+            }
+            unbindService(serviceConnection);
+            serviceBound = false;
+            playbackController = null;
+        }
+        super.onStop();
+    }
+
+    @Override
+    protected void onSaveInstanceState(@NonNull Bundle outState) {
+        super.onSaveInstanceState(outState);
+        outState.putInt("tab_index", currentTabIndex);
+    }
+
+    @Override
+    protected void onDestroy() {
+        Log.d(TAG, "onDestroy");
+        super.onDestroy();
+        seekHandler.removeCallbacks(seekUpdater);
+        if (bluetoothCodecManager != null) {
+            bluetoothCodecManager.unregister();
         }
     }
 
@@ -176,6 +232,7 @@ public class MainActivity extends AppCompatActivity
         binding.tabLayout.addTab(binding.tabLayout.newTab().setText(R.string.tab_remixes));
         binding.tabLayout.addTab(binding.tabLayout.newTab().setText(R.string.tab_artists));
         binding.tabLayout.addTab(binding.tabLayout.newTab().setText(R.string.tab_folders));
+        binding.tabLayout.addTab(binding.tabLayout.newTab().setText(R.string.tab_tidal));
 
         fragments[0] = new TracksFragment();
         fragments[1] = GroupedFragment.newInstance(GroupedFragment.MODE_ALBUM);
@@ -184,6 +241,10 @@ public class MainActivity extends AppCompatActivity
         fragments[4] = GroupedFragment.newInstance(GroupedFragment.MODE_REMIX);
         fragments[5] = GroupedFragment.newInstance(GroupedFragment.MODE_ARTIST);
         fragments[6] = GroupedFragment.newInstance(GroupedFragment.MODE_FOLDER);
+
+        TidalFragment tidalFragment = new TidalFragment();
+        // TidalAuth will be set once service connects
+        fragments[7] = tidalFragment;
 
         FragmentManager fm = getSupportFragmentManager();
         FragmentTransaction ft = fm.beginTransaction();
@@ -200,6 +261,7 @@ public class MainActivity extends AppCompatActivity
                 if (index == currentTabIndex) return;
                 Log.d(TAG, "tab switched: " + tab.getText());
                 FragmentTransaction ft = fm.beginTransaction();
+                ft.setCustomAnimations(R.anim.fade_in, R.anim.fade_out);
                 ft.hide(fragments[currentTabIndex]);
                 ft.show(fragments[index]);
                 ft.commit();
@@ -215,21 +277,38 @@ public class MainActivity extends AppCompatActivity
     }
 
     private void setupPlayerControls() {
-        binding.btnPlayPause.setOnClickListener(v -> togglePlayPause());
-        binding.btnNext.setOnClickListener(v -> playNext());
-        binding.btnPrevious.setOnClickListener(v -> playPrevious());
-
-        binding.ivNowPlayingArtwork.setOnClickListener(v -> {
-            if (currentQueueIndex >= 0 && currentQueueIndex < currentQueue.size()) {
-                Track track = currentQueue.get(currentQueueIndex);
-                startActivity(ArtworkActivity.newIntent(this, track.albumId));
+        binding.btnPlayPause.setOnClickListener(v -> {
+            if (playbackController != null) {
+                if (!playbackController.isPrepared() && !tracks.isEmpty()) {
+                    playTrack(tracks.get(0), tracks);
+                } else {
+                    playbackController.togglePlayPause();
+                }
             }
         });
+        binding.btnNext.setOnClickListener(v -> {
+            if (playbackController != null) playbackController.playNext();
+        });
+        binding.btnPrevious.setOnClickListener(v -> {
+            if (playbackController != null) playbackController.playPrevious();
+        });
+
+        binding.ivNowPlayingArtwork.setOnClickListener(v -> {
+            if (playbackController != null) {
+                Track track = playbackController.getCurrentTrack();
+                if (track != null) {
+                    startActivity(ArtworkActivity.newIntent(this, track.albumId, track.artworkUrl, track));
+                }
+            }
+        });
+
+        binding.tvAudioOutputInfo.setOnClickListener(v -> cycleSignalPathMode());
+        binding.signalPathView.setOnClickListener(v -> cycleSignalPathMode());
 
         binding.seekbar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                if (fromUser && audioEngine != null) {
+                if (fromUser && playbackController != null && playbackController.isPrepared()) {
                     binding.tvCurrentTime.setText(formatTime(progress));
                 }
             }
@@ -242,13 +321,123 @@ public class MainActivity extends AppCompatActivity
             @Override
             public void onStopTrackingTouch(SeekBar seekBar) {
                 isUserSeeking = false;
-                if (audioEngine != null) {
+                if (playbackController != null && playbackController.isPrepared()) {
                     Log.d(TAG, "seekTo: " + formatTime(seekBar.getProgress()));
-                    audioEngine.seekTo(seekBar.getProgress());
+                    playbackController.seekTo(seekBar.getProgress());
                 }
             }
         });
     }
+
+    // -- Restore UI after rebind --
+
+    private void restoreUiFromService() {
+        if (playbackController == null) return;
+
+        // Push scanned tracks to service
+        if (!tracks.isEmpty()) {
+            playbackController.setAllTracks(tracks);
+        }
+
+        // Give TidalAuth to TidalFragment
+        TidalAuth tidalAuth = playbackController.getTidalAuth();
+        if (tidalAuth != null && fragments[7] instanceof TidalFragment) {
+            ((TidalFragment) fragments[7]).setTidalAuth(tidalAuth);
+        }
+
+        Track track = playbackController.getCurrentTrack();
+        if (track == null) {
+            // Nothing playing
+            return;
+        }
+
+        // Populate player panel
+        binding.tvNowPlayingTitle.setText(track.title);
+        binding.tvNowPlayingTitle.setSelected(true);
+        binding.tvNowPlayingArtist.setText(track.artist);
+        binding.tvTotalTime.setText(track.getFormattedDuration());
+        binding.seekbar.setMax((int) track.durationMs);
+        binding.seekbar.setProgress(playbackController.getCurrentPosition());
+        binding.tvCurrentTime.setText(formatTime(playbackController.getCurrentPosition()));
+
+        // Artwork
+        String artworkKey;
+        if (track.source == Track.Source.TIDAL && track.artworkUrl != null) {
+            artworkKey = "tidal:" + track.artworkUrl;
+        } else {
+            artworkKey = "album:" + track.albumId;
+        }
+        ArtworkCache.getInstance(this).loadArtwork(artworkKey, binding.ivNowPlayingArtwork, 144);
+
+        // Play/pause icon
+        if (playbackController.isPlaying()) {
+            binding.btnPlayPause.setImageResource(R.drawable.ic_pause);
+        } else {
+            binding.btnPlayPause.setImageResource(R.drawable.ic_play);
+        }
+
+        updateOutputInfo();
+
+        // Start seek updater
+        seekHandler.removeCallbacks(seekUpdater);
+        seekHandler.post(seekUpdater);
+
+        // Notify fragments
+        notifyPlaybackObservers();
+    }
+
+    // -- PlaybackCallback implementation --
+
+    @Override
+    public void onTrackChanged(Track track, long trackId) {
+        binding.tvNowPlayingTitle.setText(track.title);
+        binding.tvNowPlayingTitle.setSelected(true);
+        binding.tvNowPlayingArtist.setText(track.artist);
+        binding.tvTotalTime.setText(track.getFormattedDuration());
+        binding.tvCurrentTime.setText("0:00");
+        binding.seekbar.setMax((int) track.durationMs);
+        binding.seekbar.setProgress(0);
+        binding.btnPlayPause.setImageResource(R.drawable.ic_pause);
+
+        String artworkKey;
+        if (track.source == Track.Source.TIDAL && track.artworkUrl != null) {
+            artworkKey = "tidal:" + track.artworkUrl;
+        } else {
+            artworkKey = "album:" + track.albumId;
+        }
+        ArtworkCache.getInstance(this).loadArtwork(artworkKey, binding.ivNowPlayingArtwork, 144);
+
+        seekHandler.removeCallbacks(seekUpdater);
+        seekHandler.post(seekUpdater);
+
+        notifyPlaybackObservers();
+        ArtworkActivity.notifyAlbumChanged(track.albumId, track.artworkUrl, track);
+    }
+
+    @Override
+    public void onPlayStateChanged(boolean isPlaying) {
+        binding.btnPlayPause.setImageResource(
+                isPlaying ? R.drawable.ic_pause : R.drawable.ic_play);
+    }
+
+    @Override
+    public void onOutputChanged() {
+        updateOutputInfo();
+    }
+
+    @Override
+    public void onPrepared() {
+        updateOutputInfo();
+    }
+
+    @Override
+    public void onError(String message) {
+        Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
+        binding.btnPlayPause.setImageResource(R.drawable.ic_play);
+        binding.signalPathView.setVisibility(View.GONE);
+    }
+
+    // -- Track scanning (stays in Activity) --
 
     private void checkPermissionAndLoad() {
         String permission = Manifest.permission.READ_EXTERNAL_STORAGE;
@@ -271,7 +460,6 @@ public class MainActivity extends AppCompatActivity
             return;
         }
 
-        // Walk directories and collect audio files
         List<File> audioFiles = new ArrayList<>();
         for (String path : folderPaths) {
             File dir = new File(path);
@@ -282,7 +470,6 @@ public class MainActivity extends AppCompatActivity
         Collections.sort(audioFiles, (a, b) ->
                 a.getAbsolutePath().compareTo(b.getAbsolutePath()));
 
-        // Extract metadata in parallel
         int threads = Math.max(1, Runtime.getRuntime().availableProcessors());
         ExecutorService scanExecutor = Executors.newFixedThreadPool(threads);
         List<Future<Track>> futures = new ArrayList<>();
@@ -311,6 +498,11 @@ public class MainActivity extends AppCompatActivity
 
         registerAlbums();
         notifyFragmentsDataLoaded();
+
+        // Push tracks to service
+        if (playbackController != null) {
+            playbackController.setAllTracks(tracks);
+        }
     }
 
     private void scanDirectory(File dir, List<File> results) {
@@ -410,7 +602,7 @@ public class MainActivity extends AppCompatActivity
         }
     }
 
-    // TrackDataProvider
+    // -- TrackDataProvider --
 
     @Override
     public List<Track> getAllTracks() {
@@ -419,447 +611,78 @@ public class MainActivity extends AppCompatActivity
 
     @Override
     public void playTrack(Track track, List<Track> queue) {
-        currentQueue = new ArrayList<>(queue);
-        currentQueueIndex = -1;
-        for (int i = 0; i < currentQueue.size(); i++) {
-            if (currentQueue.get(i).id == track.id) {
-                currentQueueIndex = i;
-                break;
-            }
+        if (playbackController != null) {
+            playbackController.playTrack(track, queue);
         }
-        if (currentQueueIndex < 0) return;
-        playCurrentQueueTrack();
     }
 
     @Override
     public long getPlayingTrackId() {
-        return playingTrackId;
-    }
-
-    private void playCurrentQueueTrack() {
-        if (currentQueueIndex < 0 || currentQueueIndex >= currentQueue.size()) return;
-
-        releasePlayer();
-
-        Track track = currentQueue.get(currentQueueIndex);
-        Log.d(TAG, "playTrack: \"" + track.title + "\" by " + track.artist + " [" + track.album + "] (" + (currentQueueIndex + 1) + "/" + currentQueue.size() + ")");
-        playingTrackId = track.id;
-
-        binding.tvNowPlayingTitle.setText(track.title);
-        binding.tvNowPlayingTitle.setSelected(true);
-        binding.tvNowPlayingArtist.setText(track.artist);
-        binding.tvTotalTime.setText(track.getFormattedDuration());
-        binding.tvCurrentTime.setText("0:00");
-        binding.seekbar.setMax((int) track.durationMs);
-        binding.seekbar.setProgress(0);
-        binding.btnPlayPause.setImageResource(R.drawable.ic_pause);
-
-        ArtworkCache.getInstance(this).loadArtwork(
-                "album:" + track.albumId, binding.ivNowPlayingArtwork, 144);
-
-        if (!requestAudioFocus()) {
-            Toast.makeText(this, "Could not get audio focus", Toast.LENGTH_SHORT).show();
-            return;
-        }
-
-        audioEngine = new AudioEngine();
-        audioEngine.setOnPreparedListener(engine ->
-                runOnUiThread(() -> {
-                    updateOutputInfo();
-                    // If USB DAC is connected and we have permission, switch to it
-                    if (settings.isUsbExclusiveMode() && !usbOutputActive) {
-                        UsbDevice dac = usbAudioManager.getConnectedDac();
-                        if (dac != null && usbAudioManager.hasPermission(dac)) {
-                            switchToUsbOutput(dac);
-                        }
-                    }
-                }));
-        audioEngine.setOnCompletionListener(engine ->
-                runOnUiThread(this::playNext));
-        audioEngine.setOnErrorListener((engine, message) ->
-                runOnUiThread(() -> {
-                    if ("OUTPUT_FAILED".equals(message) && usbOutputActive) {
-                        Log.w("MainActivity", "USB output failed, falling back to speaker");
-                        switchToSpeakerOutput();
-                    } else {
-                        Toast.makeText(this, "Could not play track", Toast.LENGTH_SHORT).show();
-                        releasePlayer();
-                    }
-                }));
-        audioEngine.play(this, track.uri);
-
-        seekHandler.removeCallbacks(seekUpdater);
-        seekHandler.post(seekUpdater);
-
-        Bitmap artwork = ArtworkCache.getInstance(this).getCachedBitmap("album:" + track.albumId);
-        MusicService.setPendingArtwork(artwork);
-        startMusicService(track.title, track.artist);
-        notifyPlaybackObservers();
-        ArtworkActivity.notifyAlbumChanged(track.albumId);
-    }
-
-    private void startMusicService(String title, String artist) {
-        Intent intent = new Intent(this, MusicService.class);
-        intent.putExtra(MusicService.EXTRA_TITLE, title);
-        intent.putExtra(MusicService.EXTRA_ARTIST, artist);
-        ContextCompat.startForegroundService(this, intent);
-    }
-
-    private void stopMusicService() {
-        stopService(new Intent(this, MusicService.class));
+        return playbackController != null ? playbackController.getPlayingTrackId() : -1;
     }
 
     private void notifyPlaybackObservers() {
+        long trackId = playbackController != null ? playbackController.getPlayingTrackId() : -1;
         for (Fragment f : fragments) {
             if (f instanceof PlaybackObserver) {
-                ((PlaybackObserver) f).onPlayingTrackChanged(playingTrackId);
+                ((PlaybackObserver) f).onPlayingTrackChanged(trackId);
             }
         }
     }
 
-    private void togglePlayPause() {
-        if (audioEngine == null) {
-            if (!tracks.isEmpty()) {
-                playTrack(tracks.get(0), tracks);
-            }
-            return;
-        }
-        if (audioEngine.isPlaying()) {
-            Log.d(TAG, "pause");
-            audioEngine.pause();
-            binding.btnPlayPause.setImageResource(R.drawable.ic_play);
-        } else {
-            Log.d(TAG, "resume");
-            audioEngine.resume();
-            binding.btnPlayPause.setImageResource(R.drawable.ic_pause);
-        }
-    }
-
-    private void playNext() {
-        if (currentQueue.isEmpty()) return;
-        int nextIndex = currentQueueIndex + 1;
-        if (nextIndex < currentQueue.size()) {
-            Log.d(TAG, "playNext: advancing to queue index " + nextIndex);
-            currentQueueIndex = nextIndex;
-            playCurrentQueueTrack();
-        } else if (settings.isContinuousPlayback()) {
-            Log.d(TAG, "playNext: end of queue, continuing to next album");
-            continueToNextAlbum();
-        } else {
-            Log.d(TAG, "playNext: end of queue, wrapping to start");
-            currentQueueIndex = 0;
-            playCurrentQueueTrack();
-        }
-    }
-
-    private void continueToNextAlbum() {
-        if (currentQueue.isEmpty() || tracks.isEmpty()) return;
-
-        Track lastTrack = currentQueue.get(currentQueue.size() - 1);
-        long currentAlbumId = lastTrack.albumId;
-
-        // Build sorted list of unique albums
-        Map<Long, List<Track>> albumMap = new LinkedHashMap<>();
-        for (Track t : tracks) {
-            List<Track> list = albumMap.get(t.albumId);
-            if (list == null) {
-                list = new ArrayList<>();
-                albumMap.put(t.albumId, list);
-            }
-            list.add(t);
-        }
-
-        // Sort each album's tracks by trackNumber then title
-        for (List<Track> list : albumMap.values()) {
-            Collections.sort(list, (a, b) -> {
-                int cmp = Integer.compare(a.trackNumber, b.trackNumber);
-                return cmp != 0 ? cmp : a.title.compareToIgnoreCase(b.title);
-            });
-        }
-
-        // Sort albums alphabetically by album name
-        List<Long> albumIds = new ArrayList<>(albumMap.keySet());
-        Collections.sort(albumIds, (a, b) -> {
-            String nameA = albumMap.get(a).get(0).album;
-            String nameB = albumMap.get(b).get(0).album;
-            return nameA.compareToIgnoreCase(nameB);
-        });
-
-        // Find current album index and get next
-        int currentIdx = albumIds.indexOf(currentAlbumId);
-        int nextIdx = (currentIdx + 1) % albumIds.size();
-        long nextAlbumId = albumIds.get(nextIdx);
-
-        currentQueue = new ArrayList<>(albumMap.get(nextAlbumId));
-        currentQueueIndex = 0;
-        playCurrentQueueTrack();
-    }
-
-    private void playPrevious() {
-        if (currentQueue.isEmpty()) return;
-        if (audioEngine != null && audioEngine.getCurrentPosition() > 3000) {
-            Log.d(TAG, "playPrevious: restarting current track");
-            audioEngine.seekTo(0);
-            binding.seekbar.setProgress(0);
-            binding.tvCurrentTime.setText("0:00");
-            return;
-        }
-        Log.d(TAG, "playPrevious: going to previous track");
-        currentQueueIndex = (currentQueueIndex - 1 + currentQueue.size()) % currentQueue.size();
-        playCurrentQueueTrack();
-    }
-
-    private String formatTime(long ms) {
-        long totalSeconds = ms / 1000;
-        long minutes = totalSeconds / 60;
-        long seconds = totalSeconds % 60;
-        return minutes + ":" + String.format("%02d", seconds);
-    }
-
-    private boolean requestAudioFocus() {
-        if (hasAudioFocus) return true;
-
-        AudioAttributes attrs = new AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_MEDIA)
-                .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                .build();
-
-        audioFocusRequest = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
-                .setAudioAttributes(attrs)
-                .setOnAudioFocusChangeListener(focusChange -> {
-                    switch (focusChange) {
-                        case AudioManager.AUDIOFOCUS_GAIN:
-                            hasAudioFocus = true;
-                            if (pausedByFocusLoss && audioEngine != null) {
-                                audioEngine.resume();
-                                binding.btnPlayPause.setImageResource(R.drawable.ic_pause);
-                                pausedByFocusLoss = false;
-                            }
-                            break;
-                        case AudioManager.AUDIOFOCUS_LOSS:
-                            hasAudioFocus = false;
-                            pausedByFocusLoss = false;
-                            if (audioEngine != null && audioEngine.isPlaying()) {
-                                audioEngine.pause();
-                                binding.btnPlayPause.setImageResource(R.drawable.ic_play);
-                            }
-                            break;
-                        case AudioManager.AUDIOFOCUS_LOSS_TRANSIENT:
-                            hasAudioFocus = false;
-                            if (audioEngine != null && audioEngine.isPlaying()) {
-                                audioEngine.pause();
-                                binding.btnPlayPause.setImageResource(R.drawable.ic_play);
-                                pausedByFocusLoss = true;
-                            }
-                            break;
-                        case AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK:
-                            // Could lower volume, but for bit-perfect we just pause
-                            hasAudioFocus = false;
-                            if (audioEngine != null && audioEngine.isPlaying()) {
-                                audioEngine.pause();
-                                binding.btnPlayPause.setImageResource(R.drawable.ic_play);
-                                pausedByFocusLoss = true;
-                            }
-                            break;
-                    }
-                })
-                .build();
-
-        int result = audioManager.requestAudioFocus(audioFocusRequest);
-        hasAudioFocus = (result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED);
-        return hasAudioFocus;
-    }
-
-    private void abandonAudioFocus() {
-        if (audioFocusRequest != null) {
-            audioManager.abandonAudioFocusRequest(audioFocusRequest);
-            audioFocusRequest = null;
-        }
-        hasAudioFocus = false;
-        pausedByFocusLoss = false;
-    }
-
-    private void releasePlayer() {
-        if (audioEngine != null) {
-            audioEngine.stop();
-            audioEngine = null;
-        }
-        usbOutputActive = false;
-        abandonAudioFocus();
-    }
-
-    // UsbAudioManager.UsbAudioListener
-
-    @Override
-    public void onUsbDacConnected(UsbDevice device) {
-        Log.d(TAG, "onUsbDacConnected: " + device.getDeviceName()
-                + " exclusiveMode=" + settings.isUsbExclusiveMode()
-                + " hasPermission=" + usbAudioManager.hasPermission(device)
-                + " audioEngine=" + (audioEngine != null));
-        Toast.makeText(this, R.string.usb_dac_connected, Toast.LENGTH_SHORT).show();
-        if (settings.isUsbExclusiveMode() && !usbAudioManager.hasPermission(device)) {
-            Log.d(TAG, "onUsbDacConnected: requesting permission");
-            usbAudioManager.requestPermission(device);
-        } else if (settings.isUsbExclusiveMode()) {
-            Log.d(TAG, "onUsbDacConnected: switching to USB output");
-            switchToUsbOutput(device);
-        }
-    }
-
-    @Override
-    public void onUsbDacDisconnected() {
-        Log.d(TAG, "onUsbDacDisconnected: usbOutputActive=" + usbOutputActive + " audioEngine=" + (audioEngine != null));
-        Toast.makeText(this, R.string.usb_dac_disconnected, Toast.LENGTH_SHORT).show();
-        usbExecutor.execute(() -> {
-            if (usbOutputActive && audioEngine != null) {
-                // 2-second timeout guard: if switchOutput hangs, force-release
-                Thread switchThread = new Thread(() ->
-                        audioEngine.switchOutput(new AudioTrackOutput()));
-                switchThread.start();
-                try {
-                    switchThread.join(2000);
-                } catch (InterruptedException ignored) {}
-                if (switchThread.isAlive()) {
-                    Log.w("MainActivity", "switchOutput timed out on disconnect, forcing release");
-                    switchThread.interrupt();
-                }
-                usbOutputActive = false;
-            }
-            if (usbConnection != null) {
-                usbConnection.close();
-                usbConnection = null;
-            }
-            runOnUiThread(this::updateOutputInfo);
-        });
-    }
-
-    @Override
-    public void onUsbPermissionGranted(UsbDevice device) {
-        Log.d(TAG, "onUsbPermissionGranted: " + device.getDeviceName());
-        if (settings.isUsbExclusiveMode()) {
-            switchToUsbOutput(device);
-        }
-    }
-
-    @Override
-    public void onUsbPermissionDenied(UsbDevice device) {
-        Log.w(TAG, "onUsbPermissionDenied: " + device.getDeviceName());
-        Toast.makeText(this, R.string.usb_permission_denied, Toast.LENGTH_SHORT).show();
-    }
-
-    private void switchToUsbOutput(UsbDevice device) {
-        if (audioEngine == null) return;
-        Log.d(TAG, "switchToUsbOutput: " + device.getDeviceName());
-
-        usbExecutor.execute(() -> {
-            UsbDeviceConnection conn = usbAudioManager.getUsbManager().openDevice(device);
-            if (conn == null) {
-                Log.e(TAG, "switchToUsbOutput: openDevice returned null");
-                return;
-            }
-            Log.d(TAG, "switchToUsbOutput: opened device, fd=" + conn.getFileDescriptor());
-
-            int fd = conn.getFileDescriptor();
-            UsbAudioOutput usbOutput = new UsbAudioOutput(fd);
-
-            if (!usbOutput.open()) {
-                runOnUiThread(() -> Toast.makeText(this, "Failed to open USB device", Toast.LENGTH_SHORT).show());
-                usbOutput.release();
-                conn.close();
-                return;
-            }
-
-            // Check if current sample rate is supported
-            int currentRate = audioEngine.getSampleRate();
-            if (currentRate > 0) {
-                int[] supportedRates = usbOutput.getSupportedRates();
-                Log.d(TAG, "switchToUsbOutput: currentRate=" + currentRate
-                        + " supportedRates=" + java.util.Arrays.toString(supportedRates));
-                boolean rateSupported = false;
-                for (int rate : supportedRates) {
-                    if (rate == currentRate) {
-                        rateSupported = true;
-                        break;
-                    }
-                }
-                if (!rateSupported) {
-                    Log.w(TAG, "switchToUsbOutput: rate " + currentRate + " not supported by DAC");
-                    runOnUiThread(() -> Toast.makeText(this, R.string.usb_rate_unsupported, Toast.LENGTH_SHORT).show());
-                    usbOutput.release();
-                    conn.close();
-                    return;
-                }
-            }
-
-            if (!audioEngine.switchOutput(usbOutput)) {
-                Log.d(TAG, "switchToUsbOutput: pipeline failed, staying on speaker");
-                runOnUiThread(() -> Toast.makeText(this, "USB audio pipeline failed, using speaker",
-                        Toast.LENGTH_SHORT).show());
-                usbOutputActive = false;
-                conn.close();
-            } else {
-                Log.d(TAG, "switchToUsbOutput: success");
-                usbConnection = conn;
-                usbOutputActive = true;
-            }
-            runOnUiThread(this::updateOutputInfo);
-        });
-    }
-
-    private void switchToSpeakerOutput() {
-        if (audioEngine == null) return;
-        Log.d(TAG, "switchToSpeakerOutput");
-        usbExecutor.execute(() -> {
-            audioEngine.switchOutput(new AudioTrackOutput());
-            usbOutputActive = false;
-            Log.d(TAG, "switchToSpeakerOutput: done");
-            runOnUiThread(this::updateOutputInfo);
-        });
-    }
+    // -- Output info / Signal path --
 
     private void updateOutputInfo() {
-        if (audioEngine == null || !audioEngine.isPlaying()) {
+        if (playbackController == null || !playbackController.isPlaying()) {
             binding.tvAudioOutputInfo.setVisibility(View.GONE);
+            binding.signalPathView.setVisibility(View.GONE);
             return;
         }
 
-        int rate = audioEngine.getSampleRate();
-        int channels = audioEngine.getChannelCount();
-        int enc = audioEngine.getEncoding();
-
-        String rateStr;
-        if (rate % 1000 == 0) {
-            rateStr = (rate / 1000) + "kHz";
+        String formatStr;
+        if (playbackController.isDsd()) {
+            int dr = playbackController.getDsdRate();
+            String dsdLabel;
+            if (dr == 2822400) dsdLabel = "DSD64";
+            else if (dr == 5644800) dsdLabel = "DSD128";
+            else if (dr == 11289600) dsdLabel = "DSD256";
+            else dsdLabel = "DSD";
+            formatStr = dsdLabel;
         } else {
-            rateStr = String.format("%.1fkHz", rate / 1000.0);
-        }
+            int rate = playbackController.getSampleRate();
+            int channels = playbackController.getChannelCount();
 
-        String bitStr;
-        if (usbOutputActive) {
-            // Show DAC's actual configured bit depth
-            AudioOutput out = audioEngine.getOutput();
-            if (out instanceof UsbAudioOutput) {
-                int dacBits = ((UsbAudioOutput) out).getConfiguredBitDepth();
-                bitStr = dacBits + "bit";
+            String rateStr;
+            if (rate % 1000 == 0) {
+                rateStr = (rate / 1000) + "kHz";
             } else {
-                bitStr = "16bit";
+                rateStr = String.format("%.1fkHz", rate / 1000.0);
             }
-        } else {
-            // Show codec encoding for speaker output
-            if (enc == AudioFormat.ENCODING_PCM_FLOAT) {
-                bitStr = "32f";
-            } else if (enc == AudioFormat.ENCODING_PCM_24BIT_PACKED) {
-                bitStr = "24bit";
-            } else if (enc == AudioFormat.ENCODING_PCM_32BIT) {
-                bitStr = "32bit";
+
+            int srcBits = playbackController.getSourceBitDepth();
+
+            String bitStr;
+            if (playbackController.isUsbOutputActive()) {
+                AudioOutput out = playbackController.getOutput();
+                if (out instanceof UsbAudioOutput) {
+                    int dacBits = ((UsbAudioOutput) out).getConfiguredBitDepth();
+                    if (srcBits != dacBits) {
+                        bitStr = srcBits + ">" + dacBits + "bit";
+                    } else {
+                        bitStr = dacBits + "bit";
+                    }
+                } else {
+                    bitStr = srcBits + "bit";
+                }
             } else {
-                bitStr = "16bit";
+                bitStr = srcBits + "bit";
             }
+            formatStr = rateStr + "/" + bitStr + "/" + channels + "ch";
         }
 
         String outputName;
-        if (usbOutputActive) {
-            AudioOutput out = audioEngine.getOutput();
+        if (playbackController.isUsbOutputActive()) {
+            AudioOutput out = playbackController.getOutput();
             if (out instanceof UsbAudioOutput) {
                 int uacVer = ((UsbAudioOutput) out).getUacVersion();
                 outputName = "USB DAC (UAC" + uacVer + ")";
@@ -870,10 +693,143 @@ public class MainActivity extends AppCompatActivity
             String btName = getBluetoothOutputName();
             outputName = btName != null ? btName : "Speaker";
         }
-        String info = rateStr + "/" + bitStr + "/" + channels + "ch > " + outputName;
+        String info = formatStr + " > " + outputName;
 
         binding.tvAudioOutputInfo.setText(info);
         binding.tvAudioOutputInfo.setVisibility(View.VISIBLE);
+        updateSignalPathDisplay();
+    }
+
+    private void cycleSignalPathMode() {
+        signalPathMode = (signalPathMode + 1) % 3;
+        settings.setSignalPathMode(signalPathMode);
+        updateSignalPathDisplay();
+    }
+
+    private void updateSignalPathDisplay() {
+        if (playbackController == null || !playbackController.isPlaying()) {
+            binding.signalPathView.setVisibility(View.GONE);
+            return;
+        }
+
+        if (signalPathMode == 0) {
+            binding.signalPathView.setVisibility(View.GONE);
+            binding.tvAudioOutputInfo.setVisibility(View.VISIBLE);
+        } else {
+            Fade fade = new Fade();
+            fade.setDuration(150);
+            fade.setInterpolator(new FastOutSlowInInterpolator());
+            TransitionManager.beginDelayedTransition((ViewGroup) binding.signalPathView.getParent(), fade);
+            binding.tvAudioOutputInfo.setVisibility(View.GONE);
+            SignalPathInfo info = buildSignalPathInfo();
+            binding.signalPathView.setInfo(info, signalPathMode);
+            binding.signalPathView.setVisibility(View.VISIBLE);
+        }
+    }
+
+    private SignalPathInfo buildSignalPathInfo() {
+        SignalPathInfo info = new SignalPathInfo();
+
+        if (playbackController == null) return info;
+
+        Track currentTrack = playbackController.getCurrentTrack();
+
+        info.sourceRate = playbackController.getSampleRate();
+        info.sourceBitDepth = playbackController.getSourceBitDepth();
+        info.sourceChannels = playbackController.getChannelCount();
+        info.sourceMime = playbackController.getMime();
+        info.isDsd = playbackController.isDsd();
+        info.dsdRate = playbackController.getDsdRate();
+        info.decodedEncoding = playbackController.getEncoding();
+        info.codecName = playbackController.getCodecName();
+
+        if (info.isDsd) {
+            info.dsdPcmRate = playbackController.getSampleRate();
+            int dr = info.dsdRate;
+            if (dr == 2822400) info.sourceFormat = "DSD64";
+            else if (dr == 5644800) info.sourceFormat = "DSD128";
+            else if (dr == 11289600) info.sourceFormat = "DSD256";
+            else info.sourceFormat = "DSD";
+            info.sourceRate = dr;
+        } else {
+            info.sourceFormat = mimeToFormat(info.sourceMime);
+        }
+
+        if (currentTrack != null && currentTrack.source == Track.Source.TIDAL) {
+            info.sourceType = "TIDAL";
+            TidalModels.StreamInfo streamInfo = playbackController.getLastTidalStreamInfo();
+            if (streamInfo != null) {
+                info.tidalQuality = streamInfo.quality;
+                info.tidalRequestedQuality = streamInfo.requestedQuality;
+                info.tidalCodec = streamInfo.codec;
+                info.tidalFileSize = streamInfo.fileSize > 0
+                        ? streamInfo.fileSize : streamInfo.estimatedDashSize;
+            }
+        } else {
+            info.sourceType = "LOCAL";
+        }
+
+        AudioOutput output = playbackController.getOutput();
+        if (output instanceof UsbAudioOutput) {
+            UsbAudioOutput usb = (UsbAudioOutput) output;
+            int uac = usb.getUacVersion();
+            info.uacVersion = uac;
+            info.outputDevice = "USB DAC (UAC" + uac + ")";
+            info.outputBitDepth = usb.getConfiguredBitDepth();
+            info.outputRate = playbackController.getSampleRate();
+            info.outputChannels = playbackController.getChannelCount();
+            info.usbDeviceInfo = usb.getDeviceInfo();
+            info.usbSupportedRates = usb.getSupportedRates();
+
+            int enc = playbackController.getEncoding();
+            if (enc == android.media.AudioFormat.ENCODING_PCM_FLOAT) {
+                info.writePathLabel = "float32>int" + info.outputBitDepth;
+            } else if (enc == android.media.AudioFormat.ENCODING_PCM_16BIT && info.outputBitDepth != 16) {
+                info.writePathLabel = "int16>int" + info.outputBitDepth;
+            } else {
+                info.writePathLabel = "passthrough";
+            }
+
+            info.isBitPerfect = !info.isDsd
+                    && info.sourceBitDepth == info.outputBitDepth
+                    && ("passthrough".equals(info.writePathLabel)
+                        || "float32>int24".equals(info.writePathLabel));
+
+        } else {
+            String btName = getBluetoothOutputName();
+            if (btName != null) {
+                info.outputDevice = "Bluetooth [" + btName + "]";
+            } else {
+                info.outputDevice = "Speaker";
+            }
+            info.outputRate = playbackController.getSampleRate();
+            info.outputBitDepth = info.sourceBitDepth;
+            info.outputChannels = playbackController.getChannelCount();
+            info.isBitPerfect = false;
+        }
+
+        return info;
+    }
+
+    private static String mimeToFormat(String mime) {
+        if (mime == null) return "PCM";
+        switch (mime) {
+            case "audio/flac": return "FLAC";
+            case "audio/mpeg": return "MP3";
+            case "audio/mp4a-latm":
+            case "audio/aac": return "AAC";
+            case "audio/vorbis":
+            case "audio/ogg": return "OGG";
+            case "audio/opus": return "OPUS";
+            case "audio/raw":
+            case "audio/x-wav": return "WAV";
+            case "audio/alac": return "ALAC";
+            case "audio/x-ape": return "APE";
+            case "audio/aiff": return "AIFF";
+            case "audio/x-ms-wma": return "WMA";
+            case "audio/dsd": return "DSD";
+            default: return mime.replace("audio/", "").toUpperCase();
+        }
     }
 
     private String getBluetoothOutputName() {
@@ -890,25 +846,11 @@ public class MainActivity extends AppCompatActivity
         return null;
     }
 
-    @Override
-    protected void onDestroy() {
-        Log.d(TAG, "onDestroy");
-        super.onDestroy();
-        seekHandler.removeCallbacks(seekUpdater);
-        if (audioEngine != null) {
-            audioEngine.release();
-            audioEngine = null;
-        }
-        if (usbConnection != null) {
-            usbConnection.close();
-            usbConnection = null;
-        }
-        usbAudioManager.unregister();
-        if (bluetoothCodecManager != null) {
-            bluetoothCodecManager.unregister();
-        }
-        usbExecutor.shutdownNow();
-        stopMusicService();
+    private String formatTime(long ms) {
+        long totalSeconds = ms / 1000;
+        long minutes = totalSeconds / 60;
+        long seconds = totalSeconds % 60;
+        return minutes + ":" + String.format("%02d", seconds);
     }
 
     // BluetoothCodecManager.BluetoothCodecListener

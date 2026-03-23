@@ -62,6 +62,19 @@ public class SettingsActivity extends AppCompatActivity {
         switchUsbExclusive.setOnCheckedChangeListener((buttonView, isChecked) ->
                 settings.setUsbExclusiveMode(isChecked));
 
+        TextView tvTidalQuality = findViewById(R.id.tv_tidal_quality);
+        tvTidalQuality.setText(settings.getTidalAudioQuality());
+        tvTidalQuality.setOnClickListener(v -> {
+            String[] options = {"SMART", "HI_RES_LOSSLESS", "LOSSLESS", "HIGH", "LOW"};
+            new AlertDialog.Builder(this)
+                    .setTitle(R.string.setting_tidal_quality)
+                    .setItems(options, (dialog, which) -> {
+                        settings.setTidalAudioQuality(options[which]);
+                        tvTidalQuality.setText(options[which]);
+                    })
+                    .show();
+        });
+
         LinearLayout rowBtCodec = findViewById(R.id.row_bt_codec);
         TextView tvBtCodecDesc = findViewById(R.id.tv_bt_codec_desc);
         if (!BluetoothCodecManager.isFeatureAvailable(this)) {

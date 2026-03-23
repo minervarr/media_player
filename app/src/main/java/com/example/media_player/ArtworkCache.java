@@ -17,6 +17,8 @@ import android.widget.ImageView;
 
 import java.io.File;
 import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
@@ -146,13 +148,47 @@ public class ArtworkCache {
     }
 
     private Bitmap resolve(String artworkKey, int sizePx) {
-        if (artworkKey.startsWith("album:")) {
+        if (artworkKey.startsWith("tidal:")) {
+            return resolveTidalUrl(artworkKey.substring(6), sizePx);
+        } else if (artworkKey.startsWith("album:")) {
             return resolveAlbum(artworkKey, sizePx);
         } else if (artworkKey.startsWith("folder:")) {
             String folderPath = artworkKey.substring(7);
             return resolveFolder(folderPath, sizePx);
         }
         return null;
+    }
+
+    private Bitmap resolveTidalUrl(String artworkPath, int sizePx) {
+        int tidalSize = pickTidalSize(sizePx);
+        String url = "https://resources.tidal.com/images/"
+                + artworkPath + "/" + tidalSize + "x" + tidalSize + ".jpg";
+        try {
+            HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+            conn.setConnectTimeout(10000);
+            conn.setReadTimeout(10000);
+            try (InputStream is = conn.getInputStream()) {
+                byte[] data = readStream(is);
+                Bitmap bmp = decodeSampled(data, sizePx);
+                if (bmp != null) {
+                    Log.d(TAG, "resolve tidal artwork: " + tidalSize + "x" + tidalSize);
+                }
+                return bmp;
+            } finally {
+                conn.disconnect();
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "resolve tidal artwork failed: " + e.getMessage());
+            return null;
+        }
+    }
+
+    private static int pickTidalSize(int sizePx) {
+        if (sizePx <= 80) return 80;
+        if (sizePx <= 160) return 160;
+        if (sizePx <= 320) return 320;
+        if (sizePx <= 640) return 640;
+        return 1280;
     }
 
     private Bitmap resolveFullSize(String artworkKey, int sizePx) {
@@ -301,6 +337,10 @@ public class ArtworkCache {
     }
 
     private Bitmap decodeSampled(byte[] data, int targetSize) {
+        if (data.length >= 3 && NativeImageDecoder.nativeIsJpeg(data, data.length)) {
+            Bitmap nativeBmp = NativeImageDecoder.nativeDecodeJpeg(data, targetSize);
+            if (nativeBmp != null) return nativeBmp;
+        }
         BitmapFactory.Options opts = new BitmapFactory.Options();
         opts.inJustDecodeBounds = true;
         BitmapFactory.decodeByteArray(data, 0, data.length, opts);
@@ -310,6 +350,11 @@ public class ArtworkCache {
     }
 
     private Bitmap decodeSampledFile(String path, int targetSize) {
+        String lower = path.toLowerCase();
+        if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) {
+            Bitmap nativeBmp = NativeImageDecoder.nativeDecodeJpegFile(path, targetSize);
+            if (nativeBmp != null) return nativeBmp;
+        }
         BitmapFactory.Options opts = new BitmapFactory.Options();
         opts.inJustDecodeBounds = true;
         BitmapFactory.decodeFile(path, opts);
