@@ -46,9 +46,11 @@ public class BluetoothCodecActivity extends AppCompatActivity
     private LinearLayout permissionBanner;
     private TextView tvActiveDeviceName;
     private TextView tvActiveDeviceCodec;
+    private TextView tvActiveDeviceSaved;
 
     private boolean permissionGranted;
     private boolean proxyReady;
+    private boolean autoAppliedThisSession;
 
     // Pending CDM association callback (for pre-API 33 flow)
     private BluetoothCodecManager.AssociationCallback pendingCdmCallback;
@@ -78,7 +80,8 @@ public class BluetoothCodecActivity extends AppCompatActivity
             getSupportActionBar().setTitle(R.string.bt_codec_title);
         }
 
-        codecSettings = new BluetoothCodecSettings(this);
+        MatrixPlayerDatabase db = MatrixPlayerDatabase.getInstance(this);
+        codecSettings = new BluetoothCodecSettings(db, this);
         codecManager = new BluetoothCodecManager(this);
         codecManager.setListener(this);
         codecManager.setOnProxyReady(() -> {
@@ -92,6 +95,7 @@ public class BluetoothCodecActivity extends AppCompatActivity
         permissionBanner = findViewById(R.id.permission_banner);
         tvActiveDeviceName = findViewById(R.id.tv_active_device_name);
         tvActiveDeviceCodec = findViewById(R.id.tv_active_device_codec);
+        tvActiveDeviceSaved = findViewById(R.id.tv_active_device_saved);
 
         setupPermissionBanner();
         requestBluetoothPermission();
@@ -207,6 +211,8 @@ public class BluetoothCodecActivity extends AppCompatActivity
     @SuppressLint("MissingPermission")
     private void updateActiveDevice() {
         BluetoothA2dp proxy = codecManager.getA2dpProxy();
+        tvActiveDeviceSaved.setVisibility(View.GONE);
+
         if (proxy == null) {
             tvActiveDeviceName.setText(R.string.bt_codec_no_active);
             tvActiveDeviceCodec.setVisibility(View.GONE);
@@ -223,12 +229,14 @@ public class BluetoothCodecActivity extends AppCompatActivity
         BluetoothDevice active = connected.get(0);
         tvActiveDeviceName.setText(active.getName() != null ? active.getName() : active.getAddress());
 
+        int currentCodecType = -1;
+
         // Try getting codec status via reflection first
         BluetoothCodecManager.CodecStatusResult result =
                 codecManager.invokeGetCodecStatusResult(active);
 
         if (result.securityException) {
-            // CDM association needed for this device
+            // CDM association needed -- can't determine state, skip auto-apply
             tvActiveDeviceCodec.setText(R.string.bt_codec_needs_association);
             tvActiveDeviceCodec.setVisibility(View.VISIBLE);
             return;
@@ -240,19 +248,38 @@ public class BluetoothCodecActivity extends AppCompatActivity
                 String codecInfo = describeCodecConfig(current);
                 tvActiveDeviceCodec.setText(getString(R.string.bt_codec_current, codecInfo));
                 tvActiveDeviceCodec.setVisibility(View.VISIBLE);
-                return;
+                currentCodecType = current.getCodecType();
             }
         }
 
-        // Fallback: try reading from Settings.Global
-        BluetoothDeviceCodecConfig fromSettings = codecManager.readCodecFromSettings();
-        if (fromSettings != null) {
-            tvActiveDeviceCodec.setText(getString(R.string.bt_codec_current,
-                    fromSettings.getSummary()));
-            tvActiveDeviceCodec.setVisibility(View.VISIBLE);
-        } else {
-            tvActiveDeviceCodec.setText(R.string.bt_codec_current_unknown);
-            tvActiveDeviceCodec.setVisibility(View.VISIBLE);
+        if (currentCodecType < 0) {
+            // Fallback: try reading from Settings.Global
+            BluetoothDeviceCodecConfig fromSettings = codecManager.readCodecFromSettings();
+            if (fromSettings != null) {
+                tvActiveDeviceCodec.setText(getString(R.string.bt_codec_current,
+                        fromSettings.getSummary()));
+                tvActiveDeviceCodec.setVisibility(View.VISIBLE);
+                currentCodecType = fromSettings.codecType;
+            } else {
+                tvActiveDeviceCodec.setText(R.string.bt_codec_current_unknown);
+                tvActiveDeviceCodec.setVisibility(View.VISIBLE);
+            }
+        }
+
+        // Check saved config and auto-apply if codec type differs
+        String mac = active.getAddress();
+        BluetoothDeviceCodecConfig savedConfig = codecSettings.getDeviceConfig(mac);
+
+        if (savedConfig != null && currentCodecType >= 0
+                && currentCodecType != savedConfig.codecType) {
+            tvActiveDeviceSaved.setText(getString(R.string.bt_codec_saved_profile,
+                    savedConfig.getSummary()));
+            tvActiveDeviceSaved.setVisibility(View.VISIBLE);
+
+            if (!autoAppliedThisSession) {
+                autoAppliedThisSession = true;
+                applyWithAssociationIfNeeded(active, savedConfig);
+            }
         }
     }
 

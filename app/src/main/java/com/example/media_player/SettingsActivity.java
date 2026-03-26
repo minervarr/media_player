@@ -16,6 +16,9 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.widget.SwitchCompat;
 import androidx.appcompat.widget.Toolbar;
 
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
+
 import java.io.File;
 import java.util.HashSet;
 import java.util.Set;
@@ -29,6 +32,9 @@ public class SettingsActivity extends AppCompatActivity {
     private TextView tvNoFolders;
     private Set<String> folders;
     private boolean foldersChanged;
+    private TextView tvEqProfile;
+    private SwitchCompat switchEq;
+    private ActivityResultLauncher<Intent> eqProfileLauncher;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -75,6 +81,25 @@ public class SettingsActivity extends AppCompatActivity {
                     .show();
         });
 
+        // Headphone EQ
+        eqProfileLauncher = registerForActivityResult(
+                new ActivityResultContracts.StartActivityForResult(), result -> {
+                    if (result.getResultCode() == RESULT_OK) {
+                        refreshEqLabel();
+                    }
+                });
+
+        switchEq = findViewById(R.id.switch_eq);
+        tvEqProfile = findViewById(R.id.tv_eq_profile);
+        refreshEqLabel();
+        switchEq.setChecked(settings.isEqEnabled());
+        switchEq.setOnCheckedChangeListener((buttonView, isChecked) ->
+                settings.setEqEnabled(isChecked));
+
+        LinearLayout rowEq = findViewById(R.id.row_eq);
+        rowEq.setOnClickListener(v ->
+                eqProfileLauncher.launch(new Intent(this, EqProfileActivity.class)));
+
         LinearLayout rowBtCodec = findViewById(R.id.row_bt_codec);
         TextView tvBtCodecDesc = findViewById(R.id.tv_bt_codec_desc);
         if (!BluetoothCodecManager.isFeatureAvailable(this)) {
@@ -82,6 +107,15 @@ public class SettingsActivity extends AppCompatActivity {
         }
         rowBtCodec.setOnClickListener(v ->
                 startActivity(new Intent(this, BluetoothCodecActivity.class)));
+    }
+
+    private void refreshEqLabel() {
+        String name = settings.getEqProfileName();
+        if (name != null && !name.isEmpty()) {
+            tvEqProfile.setText(name);
+        } else {
+            tvEqProfile.setText(R.string.setting_eq_none);
+        }
     }
 
     private void refreshFolderList() {

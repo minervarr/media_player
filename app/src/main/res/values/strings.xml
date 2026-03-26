@@ -31,10 +31,10 @@
     <string name="setting_bt_codec_desc">Per-device A2DP codec configuration</string>
     <string name="setting_bt_codec_unavailable">Not available on this device</string>
     <string name="bt_codec_title">Bluetooth Codec</string>
-    <string name="bt_codec_active_device">Active Device</string>
+    <string name="bt_codec_active_device">Connected Device</string>
     <string name="bt_codec_no_active">No A2DP device connected</string>
-    <string name="bt_codec_paired_devices">Paired Devices</string>
-    <string name="bt_codec_no_config">No config</string>
+    <string name="bt_codec_paired_devices">Device Profiles</string>
+    <string name="bt_codec_no_config">No saved profile</string>
     <string name="bt_codec_configure">Configure Codec</string>
     <string name="bt_codec_label">Codec</string>
     <string name="bt_codec_sample_rate">Sample Rate</string>
@@ -63,6 +63,7 @@
     <string name="bt_codec_needs_association">Associate device to see codec status</string>
     <string name="bt_codec_associating">Requesting device association...</string>
     <string name="bt_codec_association_failed">Association failed: %s</string>
+    <string name="bt_codec_saved_profile">Saved: %s</string>
 
     <string name="setting_music_folders">Music folders</string>
     <string name="setting_music_folders_empty">No folders configured</string>
@@ -93,8 +94,70 @@
 
     <string name="lyrics_no_lyrics">No lyrics available</string>
 
+    <string name="setting_eq">Headphone EQ</string>
+    <string name="setting_eq_none">No profile selected</string>
+    <string name="eq_title">Headphone EQ</string>
+    <string name="eq_search_hint">Search headphones...</string>
+    <string name="eq_none">None</string>
+    <string name="eq_section_over_ear">Over-ear</string>
+    <string name="eq_section_in_ear">In-ear</string>
+    <string name="eq_section_earbud">Earbud</string>
+    <string name="eq_section_other">Other</string>
+
     <string name="signal_path_source">SOURCE</string>
     <string name="signal_path_decode">DECODE</string>
     <string name="signal_path_output">OUTPUT</string>
     <string name="signal_path_bit_perfect">[BIT-PERFECT]</string>
+
+    <!-- Search -->
+    <string name="search_title">Search</string>
+    <string name="search_hint">Search tracks, artists, albums...</string>
+    <string name="search_clear">\u00D7</string>
+    <string name="search_filters">Filters</string>
+    <string name="search_save">Save</string>
+    <string name="search_no_results">No results</string>
+    <string name="search_recently_played">Recently Played</string>
+    <string name="search_top_artists">Top Artists</string>
+    <string name="search_advanced_title">Advanced Search</string>
+    <string name="search_filter_artist">Artist</string>
+    <string name="search_filter_album_artist">Album Artist</string>
+    <string name="search_filter_composer">Composer</string>
+    <string name="search_filter_genre">Genre</string>
+    <string name="search_filter_year">Year range</string>
+    <string name="search_filter_year_from">From</string>
+    <string name="search_filter_year_to">To</string>
+    <string name="search_filter_source">Source</string>
+    <string name="search_source_any">Any</string>
+    <string name="search_source_local">Local</string>
+    <string name="search_source_tidal">TIDAL</string>
+    <string name="search_filter_format">Format</string>
+    <string name="search_filter_format_hint">e.g. FLAC, MP3</string>
+    <string name="search_filter_min_bitrate">Min bitrate (kbps)</string>
+    <string name="search_filter_min_bitrate_hint">e.g. 320</string>
+    <string name="search_filter_min_sample_rate">Min sample rate (Hz)</string>
+    <string name="search_filter_min_sample_rate_hint">e.g. 44100</string>
+    <string name="search_filter_apply">Apply</string>
+    <string name="search_filter_clear">Clear</string>
+    <string name="search_save_prompt_title">Save Smart Playlist</string>
+    <string name="search_save_prompt_hint">Playlist name</string>
+    <string name="search_save_success">Smart playlist saved</string>
+
+    <!-- Stats -->
+    <string name="tab_stats">Stats</string>
+    <string name="stats_summary">Summary</string>
+    <string name="stats_total_time">Total listening time</string>
+    <string name="stats_total_tracks">Total tracks played</string>
+    <string name="stats_unique_tracks">Unique tracks</string>
+    <string name="stats_most_played">Most Played</string>
+    <string name="stats_most_skipped">Most Skipped</string>
+    <string name="stats_top_artists">Top Artists</string>
+    <string name="stats_by_source">By Source</string>
+    <string name="stats_rated_tracks">Top Rated</string>
+    <string name="stats_export">Export Data</string>
+    <string name="stats_export_progress">Exporting...</string>
+    <string name="stats_export_done">Export ready</string>
+    <string name="stats_export_failed">Export failed</string>
+    <string name="stats_plays">%d plays</string>
+    <string name="stats_skips">%d skips</string>
+    <string name="stats_no_data">No listening data yet</string>
 </resources>

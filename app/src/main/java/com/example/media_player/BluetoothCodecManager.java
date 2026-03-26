@@ -99,7 +99,8 @@ public class BluetoothCodecManager {
 
     public BluetoothCodecManager(Context context) {
         this.context = context.getApplicationContext();
-        this.codecSettings = new BluetoothCodecSettings(context);
+        MatrixPlayerDatabase db = MatrixPlayerDatabase.getInstance(context);
+        this.codecSettings = new BluetoothCodecSettings(db, context);
     }
 
     public void setListener(BluetoothCodecListener listener) {

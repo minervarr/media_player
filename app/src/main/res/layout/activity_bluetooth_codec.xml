@@ -12,7 +12,6 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:background="@color/bg_surface"
-        android:elevation="4dp"
         app:titleTextColor="@color/green_bright"
         app:navigationIcon="@drawable/ic_back" />
 
@@ -112,6 +111,15 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:textColor="@color/text_secondary"
+                    android:textSize="12sp"
+                    android:layout_marginTop="2dp"
+                    android:visibility="gone" />
+
+                <TextView
+                    android:id="@+id/tv_active_device_saved"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textColor="@color/green_bright"
                     android:textSize="12sp"
                     android:layout_marginTop="2dp"
                     android:visibility="gone" />

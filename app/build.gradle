@@ -46,12 +46,16 @@ android {
             version '3.22.1'
         }
     }
+    aaptOptions {
+        noCompress 'bin'
+    }
     buildFeatures {
         viewBinding true
     }
 }
 
 dependencies {
+    implementation project(':audioengine')
     implementation libs.appcompat
     implementation libs.material
     implementation libs.constraintlayout

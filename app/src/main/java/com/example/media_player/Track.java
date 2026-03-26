@@ -14,6 +14,7 @@ public class Track {
     public final String album;
     public final long albumId;
     public final int trackNumber;
+    public final int discNumber;
     public final int year;
     public final String folderPath;
     public final String folderName;
@@ -21,9 +22,43 @@ public class Track {
     public final String tidalTrackId;
     public final String artworkUrl;
 
+    // Extended metadata
+    public final String albumArtist;
+    public final String genre;
+    public final String composer;
+    public final int bitrate;
+    public final int sampleRate;
+    public final int bitDepth;
+    public final int channels;
+    public final String format;
+
+    /** Original local-track constructor (unchanged signature). */
     public Track(long id, String title, String artist, long durationMs, Uri uri,
                  String album, long albumId, int trackNumber, int year,
                  String folderPath, String folderName) {
+        this(id, title, artist, durationMs, uri, album, albumId, trackNumber, 1, year,
+                folderPath, folderName, Source.LOCAL, null, null,
+                null, null, null, 0, 0, 0, 0, null);
+    }
+
+    /** Local-track constructor with extended metadata. */
+    public Track(long id, String title, String artist, long durationMs, Uri uri,
+                 String album, long albumId, int trackNumber, int discNumber, int year,
+                 String folderPath, String folderName,
+                 String albumArtist, String genre, String composer,
+                 int bitrate, int sampleRate, int bitDepth, int channels, String format) {
+        this(id, title, artist, durationMs, uri, album, albumId, trackNumber, discNumber, year,
+                folderPath, folderName, Source.LOCAL, null, null,
+                albumArtist, genre, composer, bitrate, sampleRate, bitDepth, channels, format);
+    }
+
+    /** Full constructor for DB reconstitution. Package-private. */
+    Track(long id, String title, String artist, long durationMs, Uri uri,
+          String album, long albumId, int trackNumber, int discNumber, int year,
+          String folderPath, String folderName, Source source,
+          String tidalTrackId, String artworkUrl,
+          String albumArtist, String genre, String composer,
+          int bitrate, int sampleRate, int bitDepth, int channels, String format) {
         this.id = id;
         this.title = title;
         this.artist = artist;
@@ -32,31 +67,30 @@ public class Track {
         this.album = album;
         this.albumId = albumId;
         this.trackNumber = trackNumber;
+        this.discNumber = discNumber;
         this.year = year;
         this.folderPath = folderPath;
         this.folderName = folderName;
-        this.source = Source.LOCAL;
-        this.tidalTrackId = null;
-        this.artworkUrl = null;
+        this.source = source;
+        this.tidalTrackId = tidalTrackId;
+        this.artworkUrl = artworkUrl;
+        this.albumArtist = albumArtist;
+        this.genre = genre;
+        this.composer = composer;
+        this.bitrate = bitrate;
+        this.sampleRate = sampleRate;
+        this.bitDepth = bitDepth;
+        this.channels = channels;
+        this.format = format;
     }
 
+    /** Tidal constructor (private). */
     private Track(long id, String title, String artist, long durationMs,
                   String album, long albumId, int trackNumber,
                   String tidalTrackId, String artworkUrl) {
-        this.id = id;
-        this.title = title;
-        this.artist = artist;
-        this.durationMs = durationMs;
-        this.uri = null;
-        this.album = album;
-        this.albumId = albumId;
-        this.trackNumber = trackNumber;
-        this.year = 0;
-        this.folderPath = "";
-        this.folderName = "";
-        this.source = Source.TIDAL;
-        this.tidalTrackId = tidalTrackId;
-        this.artworkUrl = artworkUrl;
+        this(id, title, artist, durationMs, null, album, albumId, trackNumber, 1, 0,
+                "", "", Source.TIDAL, tidalTrackId, artworkUrl,
+                null, null, null, 0, 0, 0, 0, null);
     }
 
     public static Track tidalTrack(long tidalId, String title, String artist, long durationMs,

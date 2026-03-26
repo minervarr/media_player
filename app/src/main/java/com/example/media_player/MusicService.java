@@ -13,7 +13,6 @@ import android.media.AudioAttributes;
 import android.media.AudioDeviceInfo;
 import android.media.AudioFocusRequest;
 import android.media.AudioManager;
-import android.provider.Settings;
 import android.os.Binder;
 import android.os.Handler;
 import android.os.IBinder;
@@ -23,6 +22,13 @@ import android.widget.Toast;
 
 import androidx.core.app.NotificationCompat;
 import androidx.core.content.ContextCompat;
+
+import com.matrixplayer.audioengine.AudioEngine;
+import com.matrixplayer.audioengine.AudioOutput;
+import com.matrixplayer.audioengine.AudioTrackOutput;
+import com.matrixplayer.audioengine.EqProcessor;
+import com.matrixplayer.audioengine.EqProfile;
+import com.matrixplayer.audioengine.UsbAudioOutput;
 
 import com.example.media_player.tidal.DashFlacDataSource;
 import com.example.media_player.tidal.HttpMediaDataSource;
@@ -71,8 +77,18 @@ public class MusicService extends Service implements UsbAudioManager.UsbAudioLis
     private final ExecutorService tidalExecutor = Executors.newSingleThreadExecutor();
     private volatile TidalModels.StreamInfo lastTidalStreamInfo;
 
+    private EqProcessor eqProcessor;
+    private EqProfile currentEqProfile;
+    private EqAssignmentDao eqAssignmentDao;
+
     private PlaybackCallback callback;
     private boolean foregroundStarted;
+
+    // Database
+    private StatsDao statsDao;
+    private QueueDao queueDao;
+    private volatile long currentPlayHistoryId = -1;
+    private volatile long playStartTimeMs = -1;
 
     public interface PlaybackCallback {
         void onTrackChanged(Track track, long trackId);
@@ -222,12 +238,48 @@ public class MusicService extends Service implements UsbAudioManager.UsbAudioLis
             return settings;
         }
 
+        public void reloadEq() {
+            MusicService.this.reloadEq();
+        }
+
+        public boolean isEqActive() {
+            return eqProcessor != null && currentEqProfile != null;
+        }
+
+        public EqProfile getEqProfile() {
+            return currentEqProfile;
+        }
+
         public void switchToUsbOutput(UsbDevice device) {
             MusicService.this.switchToUsbOutput(device);
         }
 
         public void switchToSpeakerOutput() {
             MusicService.this.switchToSpeakerOutput();
+        }
+
+        public StatsDao getStatsDao() {
+            return statsDao;
+        }
+
+        public QueueDao getQueueDao() {
+            return queueDao;
+        }
+
+        public EqAssignmentDao getEqAssignmentDao() {
+            return eqAssignmentDao;
+        }
+
+        /** Attempt to restore saved queue from DB. Returns true if restored. */
+        public boolean restoreSavedQueue() {
+            QueueDao.SavedQueue saved = queueDao.restoreQueue();
+            if (saved == null) return false;
+            currentQueue = new ArrayList<>(saved.queue);
+            currentQueueIndex = saved.currentIndex;
+            if (currentQueueIndex >= 0 && currentQueueIndex < currentQueue.size()) {
+                playingTrackId = currentQueue.get(currentQueueIndex).id;
+            }
+            return true;
         }
     }
 
@@ -241,6 +293,11 @@ public class MusicService extends Service implements UsbAudioManager.UsbAudioLis
         audioManager = (AudioManager) getSystemService(AUDIO_SERVICE);
         tidalAuth = new TidalAuth(this);
         tidalApi = new TidalApi(tidalAuth);
+
+        MatrixPlayerDatabase dbHelper = MatrixPlayerDatabase.getInstance(this);
+        statsDao = new StatsDao(dbHelper);
+        queueDao = new QueueDao(dbHelper);
+        eqAssignmentDao = new EqAssignmentDao(dbHelper);
 
         usbAudioManager = new UsbAudioManager(this);
         usbAudioManager.setListener(this);
@@ -316,14 +373,33 @@ public class MusicService extends Service implements UsbAudioManager.UsbAudioLis
                 + " [" + track.album + "] (" + (currentQueueIndex + 1)
                 + "/" + currentQueue.size() + ")");
 
+        // Finalize previous play stats
+        finalizePlayStats();
+
         if (!requestAudioFocus()) {
             fireError("Could not get audio focus");
             return;
         }
 
+        // Record play start
+        currentPlayHistoryId = statsDao.recordPlayStart(track, resolveOutputDeviceName());
+        playStartTimeMs = System.currentTimeMillis();
+
+        // Persist queue state
+        int posMs = audioEngine != null ? audioEngine.getCurrentPosition() : 0;
+        queueDao.saveQueue(currentQueue, currentQueueIndex, posMs, true);
+
         audioEngine = new AudioEngine();
+        configureEq(track);
         audioEngine.setOnPreparedListener(engine ->
                 mainHandler.post(() -> {
+                    // Configure EQ with actual sample rate now that format is known
+                    if (audioEngine != null && eqProcessor != null && currentEqProfile != null
+                            && !audioEngine.isDsd()) {
+                        eqProcessor.computeCoefficients(currentEqProfile,
+                                audioEngine.getSampleRate(), audioEngine.getChannelCount(),
+                                audioEngine.getEncoding());
+                    }
                     if (audioEngine != null && audioEngine.isDsd() && !usbOutputActive) {
                         UsbDevice dac = usbAudioManager.getConnectedDac();
                         if (dac != null && usbAudioManager.hasPermission(dac)) {
@@ -400,22 +476,8 @@ public class MusicService extends Service implements UsbAudioManager.UsbAudioLis
         }
 
         if (btActive) {
-            // Read active BT codec from system settings
-            int codecType = -1;
-            try {
-                codecType = Settings.Global.getInt(getContentResolver(),
-                        "bluetooth_a2dp_codec", -1);
-            } catch (Exception ignored) {}
-
-            // LDAC=4, aptX HD=3 -> LOSSLESS; AAC=1, SBC=0, aptX=2 -> HIGH
-            if (codecType == BluetoothDeviceCodecConfig.CODEC_LDAC
-                    || codecType == BluetoothDeviceCodecConfig.CODEC_APTX_HD) {
-                Log.d(TAG, "Smart quality: Bluetooth codec=" + codecType + " -> LOSSLESS");
-                return "LOSSLESS";
-            } else {
-                Log.d(TAG, "Smart quality: Bluetooth codec=" + codecType + " -> HIGH");
-                return "HIGH";
-            }
+            Log.d(TAG, "Smart quality: Bluetooth -> LOSSLESS");
+            return "LOSSLESS";
         }
 
         // Speaker / wired headphones -> lossless is fine
@@ -548,10 +610,36 @@ public class MusicService extends Service implements UsbAudioManager.UsbAudioLis
     }
 
     private void handleGaplessTransition() {
+        // Finalize stats for the track that just ended
+        finalizePlayStats();
+
         currentQueueIndex++;
         if (currentQueueIndex >= 0 && currentQueueIndex < currentQueue.size()) {
             Track track = currentQueue.get(currentQueueIndex);
             playingTrackId = track.id;
+
+            // Record start for new track
+            currentPlayHistoryId = statsDao.recordPlayStart(track, resolveOutputDeviceName());
+            playStartTimeMs = System.currentTimeMillis();
+
+            // Persist queue state
+            queueDao.saveQueue(currentQueue, currentQueueIndex, 0, true);
+            // Re-evaluate EQ profile for the new track (may differ per-entity)
+            if (settings.isEqEnabled()) {
+                EqProfile newProfile = resolveEqProfile(track);
+                if (newProfile != currentEqProfile) {
+                    currentEqProfile = newProfile;
+                    if (currentEqProfile != null && eqProcessor != null
+                            && audioEngine != null && !audioEngine.isDsd()) {
+                        eqProcessor.computeCoefficients(currentEqProfile,
+                                audioEngine.getSampleRate(), audioEngine.getChannelCount(),
+                                audioEngine.getEncoding());
+                    } else if (currentEqProfile == null && eqProcessor != null) {
+                        eqProcessor.setEnabled(false);
+                    }
+                }
+            }
+
             Log.d(TAG, "gapless transition: \"" + track.title + "\" ("
                     + (currentQueueIndex + 1) + "/" + currentQueue.size() + ")");
             updateNotification(track);
@@ -675,10 +763,123 @@ public class MusicService extends Service implements UsbAudioManager.UsbAudioLis
         pausedByFocusLoss = false;
     }
 
+    private void configureEq(Track track) {
+        boolean eqEnabled = settings.isEqEnabled();
+
+        if (!eqEnabled) {
+            currentEqProfile = null;
+            if (eqProcessor != null) {
+                eqProcessor.destroy();
+                eqProcessor = null;
+            }
+            if (audioEngine != null) audioEngine.setEqProcessor(null);
+            return;
+        }
+
+        // Per-entity resolution: track -> album -> artist -> folder -> global
+        currentEqProfile = resolveEqProfile(track);
+
+        if (currentEqProfile == null) {
+            Log.d(TAG, "EQ enabled but no profile resolved");
+            if (eqProcessor != null) {
+                eqProcessor.destroy();
+                eqProcessor = null;
+            }
+            if (audioEngine != null) audioEngine.setEqProcessor(null);
+            return;
+        }
+
+        if (eqProcessor == null) {
+            eqProcessor = new EqProcessor();
+        }
+        if (audioEngine != null) {
+            audioEngine.setEqProcessor(eqProcessor);
+        }
+        Log.d(TAG, "EQ configured: " + currentEqProfile.name);
+    }
+
+    private EqProfile resolveEqProfile(Track track) {
+        // Check per-entity assignments first
+        if (eqAssignmentDao != null && track != null) {
+            EqAssignmentDao.Assignment a = eqAssignmentDao.resolveForTrack(track);
+            if (a != null) {
+                EqProfile p = EqProfile.find(this, a.profileName, a.profileSource, a.profileForm);
+                if (p != null) {
+                    Log.d(TAG, "EQ resolved per-entity: type=" + a.entityType
+                            + " profile=" + a.profileName);
+                    return p;
+                }
+            }
+        }
+
+        // Fall back to global default
+        String profileName = settings.getEqProfileName();
+        if (profileName == null || profileName.isEmpty()) return null;
+        EqProfile p = EqProfile.find(this, profileName,
+                settings.getEqProfileSource(), settings.getEqProfileForm());
+        if (p == null) {
+            Log.w(TAG, "EQ profile not found: " + profileName);
+        }
+        return p;
+    }
+
+    private void reloadEq() {
+        Track current = null;
+        if (currentQueueIndex >= 0 && currentQueueIndex < currentQueue.size()) {
+            current = currentQueue.get(currentQueueIndex);
+        }
+        configureEq(current);
+        // If already playing, reconfigure with current format
+        if (audioEngine != null && eqProcessor != null && currentEqProfile != null
+                && audioEngine.getSampleRate() > 0 && !audioEngine.isDsd()) {
+            eqProcessor.computeCoefficients(currentEqProfile,
+                    audioEngine.getSampleRate(), audioEngine.getChannelCount(),
+                    audioEngine.getEncoding());
+        }
+    }
+
+    private String resolveOutputDeviceName() {
+        if (usbOutputActive) return "USB DAC";
+        AudioDeviceInfo[] devices = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS);
+        for (AudioDeviceInfo device : devices) {
+            if (device.getType() == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP) {
+                CharSequence name = device.getProductName();
+                if (name != null && name.length() > 0) {
+                    return "Bluetooth [" + name + "]";
+                }
+                return "Bluetooth";
+            }
+        }
+        return "Speaker";
+    }
+
+    private void finalizePlayStats() {
+        if (currentPlayHistoryId >= 0 && playStartTimeMs > 0) {
+            long durationPlayed = System.currentTimeMillis() - playStartTimeMs;
+            Track current = null;
+            if (currentQueueIndex >= 0 && currentQueueIndex < currentQueue.size()) {
+                current = currentQueue.get(currentQueueIndex);
+            }
+            long trackDuration = current != null ? current.durationMs : 0;
+            int sr = audioEngine != null ? audioEngine.getSampleRate() : 0;
+            int bd = audioEngine != null ? audioEngine.getSourceBitDepth() : 0;
+            String tidalQ = lastTidalStreamInfo != null ? lastTidalStreamInfo.quality : null;
+            statsDao.recordPlayEnd(currentPlayHistoryId, durationPlayed, trackDuration,
+                    sr, bd, tidalQ);
+            currentPlayHistoryId = -1;
+            playStartTimeMs = -1;
+        }
+    }
+
     private void releasePlayer() {
+        finalizePlayStats();
         if (audioEngine != null) {
             audioEngine.stop();
             audioEngine = null;
+        }
+        if (eqProcessor != null) {
+            eqProcessor.destroy();
+            eqProcessor = null;
         }
         usbOutputActive = false;
         lastTidalStreamInfo = null;
@@ -782,7 +983,7 @@ public class MusicService extends Service implements UsbAudioManager.UsbAudioLis
             }
 
             int currentRate = audioEngine.getSampleRate();
-            if (currentRate > 0) {
+            if (currentRate > 0 && !audioEngine.isDsd()) {
                 int[] supportedRates = usbOutput.getSupportedRates();
                 Log.d(TAG, "switchToUsbOutput: currentRate=" + currentRate
                         + " supportedRates=" + java.util.Arrays.toString(supportedRates));

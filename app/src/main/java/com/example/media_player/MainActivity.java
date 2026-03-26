@@ -39,6 +39,11 @@ import androidx.fragment.app.FragmentManager;
 import androidx.fragment.app.FragmentTransaction;
 import androidx.interpolator.view.animation.FastOutSlowInInterpolator;
 
+import com.matrixplayer.audioengine.AudioOutput;
+import com.matrixplayer.audioengine.EqProfile;
+import com.matrixplayer.audioengine.SignalPathInfo;
+import com.matrixplayer.audioengine.UsbAudioOutput;
+
 import com.example.media_player.databinding.ActivityMainBinding;
 import com.example.media_player.tidal.TidalAuth;
 import com.example.media_player.tidal.TidalFragment;
@@ -49,9 +54,11 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -72,8 +79,10 @@ public class MainActivity extends AppCompatActivity
     private final List<Track> tracks = new ArrayList<>();
     private boolean isUserSeeking = false;
 
-    private final Fragment[] fragments = new Fragment[8];
+    private final Fragment[] fragments = new Fragment[9];
     private int currentTabIndex = 0;
+    private SearchFragment searchFragment;
+    private boolean searchVisible;
 
     private AppSettings settings;
     private BluetoothCodecManager bluetoothCodecManager;
@@ -142,6 +151,9 @@ public class MainActivity extends AppCompatActivity
         signalPathMode = settings.getSignalPathMode();
         audioManager = (AudioManager) getSystemService(AUDIO_SERVICE);
 
+        // Init artwork disk cache (L2 behind in-memory LruCache)
+        ArtworkCache.getInstance(this).initDiskCache(MatrixPlayerDatabase.getInstance(this));
+
         enableFullscreen();
         setSupportActionBar(binding.toolbar);
 
@@ -208,11 +220,32 @@ public class MainActivity extends AppCompatActivity
 
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {
+        if (item.getItemId() == R.id.action_search) {
+            toggleSearchFragment();
+            return true;
+        }
         if (item.getItemId() == R.id.action_settings) {
             settingsLauncher.launch(new Intent(this, SettingsActivity.class));
             return true;
         }
         return super.onOptionsItemSelected(item);
+    }
+
+    private void toggleSearchFragment() {
+        FragmentManager fm = getSupportFragmentManager();
+        FragmentTransaction ft = fm.beginTransaction();
+        ft.setCustomAnimations(R.anim.fade_in, R.anim.fade_out);
+        if (searchVisible) {
+            ft.hide(searchFragment);
+            ft.show(fragments[currentTabIndex]);
+            ft.commit();
+            searchVisible = false;
+        } else {
+            ft.hide(fragments[currentTabIndex]);
+            ft.show(searchFragment);
+            ft.commit();
+            searchVisible = true;
+        }
     }
 
     private void enableFullscreen() {
@@ -233,6 +266,7 @@ public class MainActivity extends AppCompatActivity
         binding.tabLayout.addTab(binding.tabLayout.newTab().setText(R.string.tab_artists));
         binding.tabLayout.addTab(binding.tabLayout.newTab().setText(R.string.tab_folders));
         binding.tabLayout.addTab(binding.tabLayout.newTab().setText(R.string.tab_tidal));
+        binding.tabLayout.addTab(binding.tabLayout.newTab().setText(R.string.tab_stats));
 
         fragments[0] = new TracksFragment();
         fragments[1] = GroupedFragment.newInstance(GroupedFragment.MODE_ALBUM);
@@ -245,6 +279,9 @@ public class MainActivity extends AppCompatActivity
         TidalFragment tidalFragment = new TidalFragment();
         // TidalAuth will be set once service connects
         fragments[7] = tidalFragment;
+        fragments[8] = new StatsFragment();
+
+        searchFragment = new SearchFragment();
 
         FragmentManager fm = getSupportFragmentManager();
         FragmentTransaction ft = fm.beginTransaction();
@@ -252,17 +289,24 @@ public class MainActivity extends AppCompatActivity
             ft.add(R.id.fragment_container, fragments[i], "tab_" + i);
             if (i != 0) ft.hide(fragments[i]);
         }
+        ft.add(R.id.fragment_container, searchFragment, "search");
+        ft.hide(searchFragment);
         ft.commit();
 
         binding.tabLayout.addOnTabSelectedListener(new TabLayout.OnTabSelectedListener() {
             @Override
             public void onTabSelected(TabLayout.Tab tab) {
                 int index = tab.getPosition();
-                if (index == currentTabIndex) return;
+                if (index == currentTabIndex && !searchVisible) return;
                 Log.d(TAG, "tab switched: " + tab.getText());
                 FragmentTransaction ft = fm.beginTransaction();
                 ft.setCustomAnimations(R.anim.fade_in, R.anim.fade_out);
-                ft.hide(fragments[currentTabIndex]);
+                if (searchVisible) {
+                    ft.hide(searchFragment);
+                    searchVisible = false;
+                } else {
+                    ft.hide(fragments[currentTabIndex]);
+                }
                 ft.show(fragments[index]);
                 ft.commit();
                 currentTabIndex = index;
@@ -460,6 +504,12 @@ public class MainActivity extends AppCompatActivity
             return;
         }
 
+        // DB scan cache
+        MatrixPlayerDatabase dbHelper = MatrixPlayerDatabase.getInstance(this);
+        TrackDao trackDao = new TrackDao(dbHelper);
+        AlbumDao albumDao = new AlbumDao(dbHelper);
+        Map<String, long[]> scanCache = trackDao.loadScanCache();
+
         List<File> audioFiles = new ArrayList<>();
         for (String path : folderPaths) {
             File dir = new File(path);
@@ -470,29 +520,81 @@ public class MainActivity extends AppCompatActivity
         Collections.sort(audioFiles, (a, b) ->
                 a.getAbsolutePath().compareTo(b.getAbsolutePath()));
 
-        int threads = Math.max(1, Runtime.getRuntime().availableProcessors());
-        ExecutorService scanExecutor = Executors.newFixedThreadPool(threads);
-        List<Future<Track>> futures = new ArrayList<>();
+        // Separate files into cached vs needs-scan
+        List<File> filesToScan = new ArrayList<>();
+        List<String> cachedPaths = new ArrayList<>();
+        Set<String> allScannedPaths = new HashSet<>();
 
         for (File file : audioFiles) {
-            futures.add(scanExecutor.submit(() -> extractTrackMetadata(file)));
-        }
-
-        for (Future<Track> future : futures) {
-            try {
-                Track track = future.get();
-                if (track != null) {
-                    tracks.add(track);
-                }
-            } catch (Exception e) {
-                Log.w("MainActivity", "Failed to extract metadata", e);
+            String path = file.getAbsolutePath();
+            allScannedPaths.add(path);
+            long[] cached = scanCache.get(path);
+            if (cached != null && cached[0] == file.length() && cached[1] == file.lastModified()) {
+                cachedPaths.add(path);
+            } else {
+                filesToScan.add(file);
             }
         }
 
-        scanExecutor.shutdown();
+        Log.d(TAG, "loadTracks: " + cachedPaths.size() + " cached, "
+                + filesToScan.size() + " to scan");
+
+        // Load cached tracks from DB (single bulk query instead of N individual queries)
+        if (!cachedPaths.isEmpty()) {
+            Map<String, Track> cachedTracks = trackDao.loadTracksByFilePaths(
+                    new HashSet<>(cachedPaths));
+            tracks.addAll(cachedTracks.values());
+        }
+
+        // Scan new/changed files with MMR
+        if (!filesToScan.isEmpty()) {
+            int threads = Math.max(1, Runtime.getRuntime().availableProcessors());
+            ExecutorService scanExecutor = Executors.newFixedThreadPool(threads);
+            List<Future<TrackDao.TrackScanResult>> futures = new ArrayList<>();
+
+            for (File file : filesToScan) {
+                futures.add(scanExecutor.submit(() -> {
+                    Track track = extractTrackMetadata(file);
+                    if (track != null) {
+                        return new TrackDao.TrackScanResult(track,
+                                file.getAbsolutePath(), file.length(), file.lastModified());
+                    }
+                    return null;
+                }));
+            }
+
+            List<TrackDao.TrackScanResult> scanResults = new ArrayList<>();
+            for (Future<TrackDao.TrackScanResult> future : futures) {
+                try {
+                    TrackDao.TrackScanResult result = future.get();
+                    if (result != null) {
+                        tracks.add(result.track);
+                        scanResults.add(result);
+                    }
+                } catch (Exception e) {
+                    Log.w(TAG, "Failed to extract metadata", e);
+                }
+            }
+            scanExecutor.shutdown();
+
+            // Persist scanned tracks to DB
+            if (!scanResults.isEmpty()) {
+                trackDao.upsertLocalTracks(scanResults);
+            }
+        }
+
+        // Remove stale tracks (files deleted from disk)
+        int removed = trackDao.removeStaleLocalTracks(allScannedPaths);
+        if (removed > 0) {
+            Log.d(TAG, "loadTracks: removed " + removed + " stale DB entries");
+        }
+
+        // Rebuild albums table (updates release_type classification)
+        albumDao.rebuildAlbums();
 
         long elapsed = System.currentTimeMillis() - startTime;
-        Log.d(TAG, "loadTracks: found " + tracks.size() + " tracks in " + elapsed + "ms");
+        Log.d(TAG, "loadTracks: found " + tracks.size() + " tracks in " + elapsed + "ms"
+                + " (" + cachedPaths.size() + " cached, " + filesToScan.size() + " scanned)");
 
         Collections.sort(tracks, (a, b) -> a.title.compareToIgnoreCase(b.title));
 
@@ -558,11 +660,43 @@ public class MainActivity extends AppCompatActivity
                 } catch (NumberFormatException ignored) {}
             }
 
+            int discNumber = 1;
+            String discStr = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DISC_NUMBER);
+            if (discStr != null) {
+                try {
+                    int slash = discStr.indexOf('/');
+                    if (slash >= 0) discStr = discStr.substring(0, slash);
+                    discNumber = Integer.parseInt(discStr.trim());
+                } catch (NumberFormatException ignored) {}
+            }
+
             int year = 0;
             String yearStr = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_YEAR);
             if (yearStr != null) {
                 try { year = Integer.parseInt(yearStr.trim()); } catch (NumberFormatException ignored) {}
             }
+
+            // Extended metadata
+            String albumArtist = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUMARTIST);
+            String genre = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_GENRE);
+            String composer = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_COMPOSER);
+
+            int bitrate = 0;
+            String bitrateStr = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_BITRATE);
+            if (bitrateStr != null) {
+                try { bitrate = Integer.parseInt(bitrateStr) / 1000; } catch (NumberFormatException ignored) {}
+            }
+
+            // Sample rate, bit depth, channels -- not available from MMR on all API levels.
+            // These will be populated from AudioEngine during playback if needed.
+            int sampleRateVal = 0;
+            int bitDepthVal = 0;
+            int channelsVal = 0;
+
+            // Derive format from file extension
+            String fileName = file.getName().toLowerCase(Locale.ROOT);
+            int dot = fileName.lastIndexOf('.');
+            String format = dot >= 0 ? fileName.substring(dot + 1).toUpperCase(Locale.ROOT) : null;
 
             long id = (long) file.getAbsolutePath().hashCode();
             long albumId = (long) (album + artist).hashCode();
@@ -572,9 +706,12 @@ public class MainActivity extends AppCompatActivity
             String folderName = parent != null ? parent.getName() : "Unknown";
 
             return new Track(id, title, artist, duration, uri,
-                    album, albumId, trackNumber, year, folderPath, folderName);
+                    album, albumId, trackNumber, discNumber, year,
+                    folderPath, folderName,
+                    albumArtist, genre, composer,
+                    bitrate, sampleRateVal, bitDepthVal, channelsVal, format);
         } catch (Exception e) {
-            Log.w("MainActivity", "Failed to read: " + file.getAbsolutePath(), e);
+            Log.w(TAG, "Failed to read: " + file.getAbsolutePath(), e);
             return null;
         } finally {
             try { mmr.release(); } catch (Exception ignored) {}
@@ -627,6 +764,9 @@ public class MainActivity extends AppCompatActivity
             if (f instanceof PlaybackObserver) {
                 ((PlaybackObserver) f).onPlayingTrackChanged(trackId);
             }
+        }
+        if (searchFragment != null) {
+            searchFragment.onPlayingTrackChanged(trackId);
         }
     }
 
@@ -745,6 +885,7 @@ public class MainActivity extends AppCompatActivity
 
         if (info.isDsd) {
             info.dsdPcmRate = playbackController.getSampleRate();
+            info.dsdPlaybackMode = "Native";
             int dr = info.dsdRate;
             if (dr == 2822400) info.sourceFormat = "DSD64";
             else if (dr == 5644800) info.sourceFormat = "DSD128";
@@ -805,6 +946,14 @@ public class MainActivity extends AppCompatActivity
             info.outputRate = playbackController.getSampleRate();
             info.outputBitDepth = info.sourceBitDepth;
             info.outputChannels = playbackController.getChannelCount();
+            info.isBitPerfect = false;
+        }
+
+        // EQ info
+        if (playbackController.isEqActive()) {
+            info.eqActive = true;
+            EqProfile ep = playbackController.getEqProfile();
+            info.eqProfileName = ep != null ? ep.name : null;
             info.isBitPerfect = false;
         }
 

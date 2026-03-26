@@ -190,6 +190,7 @@ public class SyncedLyricsView extends View {
 
     public void updatePosition(long positionMs) {
         if (lrcResult == null || !lrcResult.isSynced || lines == null || lines.isEmpty()) return;
+        if (lineYOffsets == null || lineHeights == null) return;  // not yet laid out
 
         int newIndex = findActiveIndex(positionMs);
 

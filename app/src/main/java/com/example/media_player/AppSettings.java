@@ -18,6 +18,10 @@ public class AppSettings {
     private static final String KEY_TIDAL_AUDIO_QUALITY = "tidal_audio_quality";
     private static final String KEY_SIGNAL_PATH_MODE = "signal_path_mode";
     private static final String KEY_LYRICS_ENABLED = "lyrics_enabled";
+    private static final String KEY_EQ_ENABLED = "eq_enabled";
+    private static final String KEY_EQ_PROFILE_NAME = "eq_profile_name";
+    private static final String KEY_EQ_PROFILE_SOURCE = "eq_profile_source";
+    private static final String KEY_EQ_PROFILE_FORM = "eq_profile_form";
 
     private final SharedPreferences prefs;
 
@@ -85,5 +89,35 @@ public class AppSettings {
     public void setLyricsEnabled(boolean enabled) {
         Log.d(TAG, "setLyricsEnabled: " + enabled);
         prefs.edit().putBoolean(KEY_LYRICS_ENABLED, enabled).apply();
+    }
+
+    public boolean isEqEnabled() {
+        return prefs.getBoolean(KEY_EQ_ENABLED, false);
+    }
+
+    public void setEqEnabled(boolean enabled) {
+        Log.d(TAG, "setEqEnabled: " + enabled);
+        prefs.edit().putBoolean(KEY_EQ_ENABLED, enabled).apply();
+    }
+
+    public String getEqProfileName() {
+        return prefs.getString(KEY_EQ_PROFILE_NAME, "");
+    }
+
+    public String getEqProfileSource() {
+        return prefs.getString(KEY_EQ_PROFILE_SOURCE, "");
+    }
+
+    public String getEqProfileForm() {
+        return prefs.getString(KEY_EQ_PROFILE_FORM, "");
+    }
+
+    public void setEqProfile(String name, String source, String form) {
+        Log.d(TAG, "setEqProfile: " + name + " (" + source + ")");
+        prefs.edit()
+                .putString(KEY_EQ_PROFILE_NAME, name)
+                .putString(KEY_EQ_PROFILE_SOURCE, source)
+                .putString(KEY_EQ_PROFILE_FORM, form)
+                .apply();
     }
 }

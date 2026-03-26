@@ -36,6 +36,7 @@ public class ArtworkCache {
     private final Context appContext;
 
     private static Bitmap placeholderBitmap;
+    private ArtworkDiskCache diskCache;
 
     private final ConcurrentHashMap<Long, AlbumInfo> albumRegistry = new ConcurrentHashMap<>();
 
@@ -74,6 +75,16 @@ public class ArtworkCache {
         return instance;
     }
 
+    public void initDiskCache(MatrixPlayerDatabase dbHelper) {
+        if (diskCache == null) {
+            diskCache = new ArtworkDiskCache(appContext, dbHelper);
+        }
+    }
+
+    public ArtworkDiskCache getDiskCache() {
+        return diskCache;
+    }
+
     public void registerAlbum(long albumId, Uri trackUri, String folderPath) {
         albumRegistry.put(albumId, new AlbumInfo(trackUri, folderPath));
     }
@@ -102,10 +113,29 @@ public class ArtworkCache {
         }
 
         executor.execute(() -> {
-            Bitmap bitmap = resolveFullSize(artworkKey, sizePx);
-            if (bitmap != null) {
-                cache.put(fullKey, bitmap);
+            // L2: check disk cache for full-size variant
+            Bitmap bitmap = null;
+            if (diskCache != null) {
+                bitmap = diskCache.get(fullKey);
+                if (bitmap != null) {
+                    cache.put(fullKey, bitmap);
+                }
             }
+
+            if (bitmap == null) {
+                bitmap = resolveFullSize(artworkKey, sizePx);
+                if (bitmap != null) {
+                    cache.put(fullKey, bitmap);
+                    if (diskCache != null) {
+                        boolean isTidal = artworkKey.startsWith("tidal:");
+                        long expiresAt = isTidal
+                                ? System.currentTimeMillis() + 7L * 24 * 60 * 60 * 1000
+                                : 0;
+                        diskCache.put(fullKey, bitmap, expiresAt);
+                    }
+                }
+            }
+
             Bitmap result = bitmap != null ? bitmap : getPlaceholder(sizePx);
             mainHandler.post(() -> {
                 Object tag = target.getTag(R.id.artwork_tag);
@@ -133,10 +163,31 @@ public class ArtworkCache {
         target.setImageBitmap(getPlaceholder(sizePx));
 
         executor.execute(() -> {
-            Bitmap bitmap = resolve(artworkKey, sizePx);
-            if (bitmap != null) {
-                cache.put(artworkKey, bitmap);
+            // L2: check disk cache before source resolution
+            Bitmap bitmap = null;
+            if (diskCache != null) {
+                bitmap = diskCache.get(artworkKey);
+                if (bitmap != null) {
+                    cache.put(artworkKey, bitmap);
+                }
             }
+
+            // L3: resolve from original source
+            if (bitmap == null) {
+                bitmap = resolve(artworkKey, sizePx);
+                if (bitmap != null) {
+                    cache.put(artworkKey, bitmap);
+                    // Write to disk cache
+                    if (diskCache != null) {
+                        boolean isTidal = artworkKey.startsWith("tidal:");
+                        long expiresAt = isTidal
+                                ? System.currentTimeMillis() + 7L * 24 * 60 * 60 * 1000
+                                : 0;
+                        diskCache.put(artworkKey, bitmap, expiresAt);
+                    }
+                }
+            }
+
             Bitmap result = bitmap != null ? bitmap : getPlaceholder(sizePx);
             mainHandler.post(() -> {
                 Object tag = target.getTag(R.id.artwork_tag);
@@ -394,7 +445,7 @@ public class ArtworkCache {
         int size = Math.max(sizePx, 2);
         placeholderBitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
         Canvas canvas = new Canvas(placeholderBitmap);
-        canvas.drawColor(0xFF1A1A1A);
+        canvas.drawColor(0xFF000000);
         Paint borderPaint = new Paint();
         borderPaint.setColor(0xFF00C853);
         borderPaint.setStyle(Paint.Style.STROKE);

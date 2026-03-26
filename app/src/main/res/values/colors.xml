@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="bg_primary">#0A0A0A</color>
-    <color name="bg_surface">#111111</color>
-    <color name="bg_item">#0D0D0D</color>
-    <color name="bg_item_playing">#0A1F0A</color>
+    <color name="bg_primary">#000000</color>
+    <color name="bg_surface">#0A0A0A</color>
+    <color name="bg_item">#000000</color>
+    <color name="bg_item_playing">#071407</color>
     <color name="green_primary">#00C853</color>
     <color name="green_bright">#00E676</color>
     <color name="green_dim">#1B5E20</color>
@@ -12,7 +12,7 @@
     <color name="text_secondary">#757575</color>
     <color name="text_playing">#00E676</color>
     <color name="amber_conversion">#FFB300</color>
-    <color name="divider">#1A1A1A</color>
+    <color name="divider">#141414</color>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
 </resources>

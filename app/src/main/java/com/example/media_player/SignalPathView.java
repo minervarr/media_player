@@ -1,5 +1,7 @@
 package com.example.media_player;
 
+import com.matrixplayer.audioengine.SignalPathInfo;
+
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Paint;
@@ -11,7 +13,7 @@ import android.view.View;
 
 public class SignalPathView extends View {
 
-    private static final int COLOR_NODE_FILL = 0xFF0D0D0D;
+    private static final int COLOR_NODE_FILL = 0xFF000000;
     private static final int COLOR_NODE_BORDER = 0xFF1B5E20;
     private static final int COLOR_GREEN_BRIGHT = 0xFF00E676;
     private static final int COLOR_TEXT_PRIMARY = 0xFFE0E0E0;
@@ -122,10 +124,14 @@ public class SignalPathView extends View {
             totalHeight += connectorGap * 2 + 12 * dp; // connector
             totalHeight += labelHeight + measureNodeHeight(getOutputLines(false));
         } else {
-            // Verbose: SOURCE + DECODE + OUTPUT
+            // Verbose: SOURCE + DECODE + [EQ] + OUTPUT
             totalHeight += labelHeight + measureNodeHeight(getSourceLines(true));
             totalHeight += connectorGap * 2 + 12 * dp;
             totalHeight += labelHeight + measureNodeHeight(getDecodeLines());
+            if (info.eqActive) {
+                totalHeight += connectorGap * 2 + 12 * dp;
+                totalHeight += labelHeight + measureNodeHeight(getEqLines());
+            }
             totalHeight += connectorGap * 2 + 12 * dp;
             totalHeight += labelHeight + measureNodeHeight(getOutputLines(true));
         }
@@ -160,6 +166,10 @@ public class SignalPathView extends View {
             y = drawNode(canvas, "SOURCE", getSourceLines(true), info.getSourceQualityColor(), left, right, y, false);
             y = drawConnector(canvas, left, right, y);
             y = drawNode(canvas, "DECODE", getDecodeLines(), info.getDecodeQualityColor(), left, right, y, false);
+            if (info.eqActive) {
+                y = drawConnector(canvas, left, right, y);
+                y = drawNode(canvas, "EQ", getEqLines(), 0xFFFFB300, left, right, y, false);
+            }
             y = drawConnector(canvas, left, right, y);
             y = drawNode(canvas, "OUTPUT", getOutputLines(true), info.getOutputQualityColor(), left, right, y, info.isBitPerfect);
         }
@@ -264,14 +274,27 @@ public class SignalPathView extends View {
         java.util.List<String> lines = new java.util.ArrayList<>();
 
         lines.add(info.codecName != null ? info.codecName : "unknown");
-        lines.add("Output: " + info.getDecodedEncodingName());
 
-        if (info.isDsd) {
-            String dsdLabel = dsdRateLabel(info.dsdRate);
-            lines.add("DSD>PCM: " + dsdLabel + " -> " + info.dsdPcmRate + "Hz/32bit");
+        if (info.isDsd && "Native".equals(info.dsdPlaybackMode)) {
+            lines.add("DSD Native (raw bitstream)");
+            lines.add(dsdRateLabel(info.dsdRate) + "  " + info.sourceChannels + "ch");
+        } else {
+            lines.add("Output: " + info.getDecodedEncodingName());
+            if (info.isDsd) {
+                String dsdLabel = dsdRateLabel(info.dsdRate);
+                lines.add("DSD>PCM: " + dsdLabel + " -> " + info.dsdPcmRate + "Hz/32bit");
+            }
         }
 
         return lines.toArray(new String[0]);
+    }
+
+    private String[] getEqLines() {
+        if (info == null || !info.eqActive) return new String[]{"--"};
+        return new String[]{
+                info.eqProfileName != null ? info.eqProfileName : "Unknown",
+                "Parametric EQ (10-band biquad)"
+        };
     }
 
     private String[] getOutputLines(boolean verbose) {
@@ -280,16 +303,24 @@ public class SignalPathView extends View {
         java.util.List<String> lines = new java.util.ArrayList<>();
 
         if (!verbose) {
-            // Util: single line with device + rate/bits
+            // Compact: single line with device + rate/bits
             StringBuilder sb = new StringBuilder();
             sb.append(info.outputDevice != null ? info.outputDevice : "Speaker");
             sb.append("  ");
-            sb.append(formatRate(info.outputRate)).append("/").append(info.outputBitDepth).append("bit");
+            if (info.isDsd && "Native".equals(info.dsdPlaybackMode)) {
+                sb.append(dsdRateLabel(info.dsdRate)).append(" Native");
+            } else {
+                sb.append(formatRate(info.outputRate)).append("/").append(info.outputBitDepth).append("bit");
+            }
             lines.add(sb.toString());
         } else {
             // Verbose: multi-line
             lines.add(info.outputDevice != null ? info.outputDevice : "Speaker");
-            lines.add(formatRate(info.outputRate) + "/" + info.outputBitDepth + "bit/" + info.outputChannels + "ch");
+            if (info.isDsd && "Native".equals(info.dsdPlaybackMode)) {
+                lines.add(dsdRateLabel(info.dsdRate) + " Native/" + info.outputChannels + "ch");
+            } else {
+                lines.add(formatRate(info.outputRate) + "/" + info.outputBitDepth + "bit/" + info.outputChannels + "ch");
+            }
 
             if (info.writePathLabel != null) {
                 lines.add("Write: " + info.writePathLabel);
