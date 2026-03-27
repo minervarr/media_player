@@ -1,0 +1,286 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.core.widget.NestedScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@color/bg_surface">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/search_advanced_title"
+            android:textColor="@color/green_bright"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="12dp" />
+
+        <!-- Artist -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/search_filter_artist"
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp" />
+        <EditText
+            android:id="@+id/et_artist"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@null"
+            android:textColor="@color/text_primary"
+            android:textSize="14sp"
+            android:inputType="text"
+            android:maxLines="1"
+            android:importantForAutofill="no"
+            android:layout_marginBottom="8dp" />
+
+        <!-- Album Artist -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/search_filter_album_artist"
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp" />
+        <EditText
+            android:id="@+id/et_album_artist"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@null"
+            android:textColor="@color/text_primary"
+            android:textSize="14sp"
+            android:inputType="text"
+            android:maxLines="1"
+            android:importantForAutofill="no"
+            android:layout_marginBottom="8dp" />
+
+        <!-- Composer -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/search_filter_composer"
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp" />
+        <EditText
+            android:id="@+id/et_composer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@null"
+            android:textColor="@color/text_primary"
+            android:textSize="14sp"
+            android:inputType="text"
+            android:maxLines="1"
+            android:importantForAutofill="no"
+            android:layout_marginBottom="8dp" />
+
+        <!-- Genre -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/search_filter_genre"
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp" />
+        <EditText
+            android:id="@+id/et_genre"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@null"
+            android:textColor="@color/text_primary"
+            android:textSize="14sp"
+            android:inputType="text"
+            android:maxLines="1"
+            android:importantForAutofill="no"
+            android:layout_marginBottom="8dp" />
+
+        <!-- Year range -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/search_filter_year"
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp" />
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginBottom="8dp">
+            <EditText
+                android:id="@+id/et_year_from"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:background="@null"
+                android:hint="@string/search_filter_year_from"
+                android:textColor="@color/text_primary"
+                android:textColorHint="@color/text_secondary"
+                android:textSize="14sp"
+                android:inputType="number"
+                android:maxLines="1"
+                android:importantForAutofill="no" />
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text=" -- "
+                android:textColor="@color/text_secondary"
+                android:textSize="14sp" />
+            <EditText
+                android:id="@+id/et_year_to"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:background="@null"
+                android:hint="@string/search_filter_year_to"
+                android:textColor="@color/text_primary"
+                android:textColorHint="@color/text_secondary"
+                android:textSize="14sp"
+                android:inputType="number"
+                android:maxLines="1"
+                android:importantForAutofill="no" />
+        </LinearLayout>
+
+        <!-- Source toggle -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/search_filter_source"
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp" />
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginBottom="8dp"
+            android:layout_marginTop="4dp">
+            <TextView
+                android:id="@+id/btn_source_any"
+                android:layout_width="0dp"
+                android:layout_height="32dp"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="@string/search_source_any"
+                android:textColor="@color/green_bright"
+                android:textSize="12sp"
+                android:background="@color/bg_item" />
+            <TextView
+                android:id="@+id/btn_source_local"
+                android:layout_width="0dp"
+                android:layout_height="32dp"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="@string/search_source_local"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp"
+                android:background="@color/bg_item" />
+            <TextView
+                android:id="@+id/btn_source_tidal"
+                android:layout_width="0dp"
+                android:layout_height="32dp"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="@string/search_source_tidal"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp"
+                android:background="@color/bg_item" />
+        </LinearLayout>
+
+        <!-- Format -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/search_filter_format"
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp" />
+        <EditText
+            android:id="@+id/et_format"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@null"
+            android:hint="@string/search_filter_format_hint"
+            android:textColor="@color/text_primary"
+            android:textColorHint="@color/text_secondary"
+            android:textSize="14sp"
+            android:inputType="text"
+            android:maxLines="1"
+            android:importantForAutofill="no"
+            android:layout_marginBottom="8dp" />
+
+        <!-- Min Bitrate -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/search_filter_min_bitrate"
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp" />
+        <EditText
+            android:id="@+id/et_min_bitrate"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@null"
+            android:hint="@string/search_filter_min_bitrate_hint"
+            android:textColor="@color/text_primary"
+            android:textColorHint="@color/text_secondary"
+            android:textSize="14sp"
+            android:inputType="number"
+            android:maxLines="1"
+            android:importantForAutofill="no"
+            android:layout_marginBottom="8dp" />
+
+        <!-- Min Sample Rate -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/search_filter_min_sample_rate"
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp" />
+        <EditText
+            android:id="@+id/et_min_sample_rate"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@null"
+            android:hint="@string/search_filter_min_sample_rate_hint"
+            android:textColor="@color/text_primary"
+            android:textColorHint="@color/text_secondary"
+            android:textSize="14sp"
+            android:inputType="number"
+            android:maxLines="1"
+            android:importantForAutofill="no"
+            android:layout_marginBottom="16dp" />
+
+        <!-- Buttons -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="end">
+
+            <TextView
+                android:id="@+id/btn_clear_filters"
+                android:layout_width="wrap_content"
+                android:layout_height="40dp"
+                android:gravity="center"
+                android:text="@string/search_filter_clear"
+                android:textColor="@color/text_secondary"
+                android:textSize="14sp"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp" />
+
+            <TextView
+                android:id="@+id/btn_apply_filters"
+                android:layout_width="wrap_content"
+                android:layout_height="40dp"
+                android:gravity="center"
+                android:text="@string/search_filter_apply"
+                android:textColor="@color/green_bright"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp" />
+
+        </LinearLayout>
+
+    </LinearLayout>
+
+</androidx.core.widget.NestedScrollView>

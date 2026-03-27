@@ -14,7 +14,7 @@ static UsbAudioDriver* activeDriver = nullptr;
 extern "C" {
 
 JNIEXPORT jlong JNICALL
-Java_com_example_media_1player_UsbAudioNative_nativeOpen(JNIEnv* env, jclass, jint fd) {
+Java_com_matrixplayer_audioengine_UsbAudioNative_nativeOpen(JNIEnv* env, jclass, jint fd) {
     std::lock_guard<std::mutex> lock(driverMutex);
     if (activeDriver) {
         activeDriver->close();
@@ -38,7 +38,7 @@ Java_com_example_media_1player_UsbAudioNative_nativeOpen(JNIEnv* env, jclass, ji
 }
 
 JNIEXPORT jintArray JNICALL
-Java_com_example_media_1player_UsbAudioNative_nativeGetSupportedRates(JNIEnv* env, jclass, jlong handle) {
+Java_com_matrixplayer_audioengine_UsbAudioNative_nativeGetSupportedRates(JNIEnv* env, jclass, jlong handle) {
     auto* driver = reinterpret_cast<UsbAudioDriver*>(handle);
     if (!driver) return nullptr;
 
@@ -51,7 +51,7 @@ Java_com_example_media_1player_UsbAudioNative_nativeGetSupportedRates(JNIEnv* en
 }
 
 JNIEXPORT jboolean JNICALL
-Java_com_example_media_1player_UsbAudioNative_nativeConfigure(JNIEnv*, jclass,
+Java_com_matrixplayer_audioengine_UsbAudioNative_nativeConfigure(JNIEnv*, jclass,
         jlong handle, jint sampleRate, jint channels, jint bitDepth) {
     auto* driver = reinterpret_cast<UsbAudioDriver*>(handle);
     if (!driver) return JNI_FALSE;
@@ -59,14 +59,14 @@ Java_com_example_media_1player_UsbAudioNative_nativeConfigure(JNIEnv*, jclass,
 }
 
 JNIEXPORT jboolean JNICALL
-Java_com_example_media_1player_UsbAudioNative_nativeStart(JNIEnv*, jclass, jlong handle) {
+Java_com_matrixplayer_audioengine_UsbAudioNative_nativeStart(JNIEnv*, jclass, jlong handle) {
     auto* driver = reinterpret_cast<UsbAudioDriver*>(handle);
     if (!driver) return JNI_FALSE;
     return driver->start() ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT jint JNICALL
-Java_com_example_media_1player_UsbAudioNative_nativeWrite(JNIEnv* env, jclass,
+Java_com_matrixplayer_audioengine_UsbAudioNative_nativeWrite(JNIEnv* env, jclass,
         jlong handle, jbyteArray data, jint offset, jint length) {
     auto* driver = reinterpret_cast<UsbAudioDriver*>(handle);
     if (!driver) return -1;
@@ -80,7 +80,7 @@ Java_com_example_media_1player_UsbAudioNative_nativeWrite(JNIEnv* env, jclass,
 }
 
 JNIEXPORT jint JNICALL
-Java_com_example_media_1player_UsbAudioNative_nativeWriteFloat32(JNIEnv* env, jclass,
+Java_com_matrixplayer_audioengine_UsbAudioNative_nativeWriteFloat32(JNIEnv* env, jclass,
         jlong handle, jbyteArray data, jint offset, jint length) {
     auto* driver = reinterpret_cast<UsbAudioDriver*>(handle);
     if (!driver) return -1;
@@ -99,7 +99,7 @@ Java_com_example_media_1player_UsbAudioNative_nativeWriteFloat32(JNIEnv* env, jc
 }
 
 JNIEXPORT jint JNICALL
-Java_com_example_media_1player_UsbAudioNative_nativeWriteInt16(JNIEnv* env, jclass,
+Java_com_matrixplayer_audioengine_UsbAudioNative_nativeWriteInt16(JNIEnv* env, jclass,
         jlong handle, jbyteArray data, jint offset, jint length) {
     auto* driver = reinterpret_cast<UsbAudioDriver*>(handle);
     if (!driver) return -1;
@@ -118,19 +118,19 @@ Java_com_example_media_1player_UsbAudioNative_nativeWriteInt16(JNIEnv* env, jcla
 }
 
 JNIEXPORT jint JNICALL
-Java_com_example_media_1player_UsbAudioNative_nativeGetConfiguredBitDepth(JNIEnv*, jclass, jlong handle) {
+Java_com_matrixplayer_audioengine_UsbAudioNative_nativeGetConfiguredBitDepth(JNIEnv*, jclass, jlong handle) {
     auto* driver = reinterpret_cast<UsbAudioDriver*>(handle);
     return driver ? driver->getConfiguredBitDepth() : 0;
 }
 
 JNIEXPORT jint JNICALL
-Java_com_example_media_1player_UsbAudioNative_nativeGetUacVersion(JNIEnv*, jclass, jlong handle) {
+Java_com_matrixplayer_audioengine_UsbAudioNative_nativeGetUacVersion(JNIEnv*, jclass, jlong handle) {
     auto* driver = reinterpret_cast<UsbAudioDriver*>(handle);
     return driver ? driver->getUacVersion() : 0;
 }
 
 JNIEXPORT jstring JNICALL
-Java_com_example_media_1player_UsbAudioNative_nativeGetDeviceInfo(JNIEnv* env, jclass, jlong handle) {
+Java_com_matrixplayer_audioengine_UsbAudioNative_nativeGetDeviceInfo(JNIEnv* env, jclass, jlong handle) {
     auto* driver = reinterpret_cast<UsbAudioDriver*>(handle);
     if (!driver) return env->NewStringUTF("No device");
 
@@ -139,19 +139,19 @@ Java_com_example_media_1player_UsbAudioNative_nativeGetDeviceInfo(JNIEnv* env, j
 }
 
 JNIEXPORT void JNICALL
-Java_com_example_media_1player_UsbAudioNative_nativeStop(JNIEnv*, jclass, jlong handle) {
+Java_com_matrixplayer_audioengine_UsbAudioNative_nativeStop(JNIEnv*, jclass, jlong handle) {
     auto* driver = reinterpret_cast<UsbAudioDriver*>(handle);
     if (driver) driver->stop();
 }
 
 JNIEXPORT void JNICALL
-Java_com_example_media_1player_UsbAudioNative_nativeFlush(JNIEnv*, jclass, jlong handle) {
+Java_com_matrixplayer_audioengine_UsbAudioNative_nativeFlush(JNIEnv*, jclass, jlong handle) {
     auto* driver = reinterpret_cast<UsbAudioDriver*>(handle);
     if (driver) driver->flush();
 }
 
 JNIEXPORT void JNICALL
-Java_com_example_media_1player_UsbAudioNative_nativeClose(JNIEnv*, jclass, jlong handle) {
+Java_com_matrixplayer_audioengine_UsbAudioNative_nativeClose(JNIEnv*, jclass, jlong handle) {
     std::lock_guard<std::mutex> lock(driverMutex);
     auto* driver = reinterpret_cast<UsbAudioDriver*>(handle);
     if (driver) {

@@ -8,7 +8,7 @@
 extern "C" {
 
 JNIEXPORT jlong JNICALL
-Java_com_example_media_1player_NativeGaplessDecoder_nativeCreate(JNIEnv*, jclass,
+Java_com_matrixplayer_audioengine_NativeGaplessDecoder_nativeCreate(JNIEnv*, jclass,
         jint delay, jint padding, jint frameSize, jlong bufferHandle) {
     auto* buffer = reinterpret_cast<NativePcmBuffer*>(bufferHandle);
     if (!buffer) return 0;
@@ -17,13 +17,13 @@ Java_com_example_media_1player_NativeGaplessDecoder_nativeCreate(JNIEnv*, jclass
 }
 
 JNIEXPORT void JNICALL
-Java_com_example_media_1player_NativeGaplessDecoder_nativeDestroy(JNIEnv*, jclass, jlong handle) {
+Java_com_matrixplayer_audioengine_NativeGaplessDecoder_nativeDestroy(JNIEnv*, jclass, jlong handle) {
     auto* decoder = reinterpret_cast<GaplessDecoder*>(handle);
     delete decoder;
 }
 
 JNIEXPORT jboolean JNICALL
-Java_com_example_media_1player_NativeGaplessDecoder_nativeProcessFrame(JNIEnv* env, jclass,
+Java_com_matrixplayer_audioengine_NativeGaplessDecoder_nativeProcessFrame(JNIEnv* env, jclass,
         jlong handle, jbyteArray data, jint offset, jint length) {
     auto* decoder = reinterpret_cast<GaplessDecoder*>(handle);
     if (!decoder) return JNI_FALSE;
@@ -37,13 +37,13 @@ Java_com_example_media_1player_NativeGaplessDecoder_nativeProcessFrame(JNIEnv* e
 }
 
 JNIEXPORT void JNICALL
-Java_com_example_media_1player_NativeGaplessDecoder_nativeSignalEnd(JNIEnv*, jclass, jlong handle) {
+Java_com_matrixplayer_audioengine_NativeGaplessDecoder_nativeSignalEnd(JNIEnv*, jclass, jlong handle) {
     auto* decoder = reinterpret_cast<GaplessDecoder*>(handle);
     if (decoder) decoder->signalEnd();
 }
 
 JNIEXPORT void JNICALL
-Java_com_example_media_1player_NativeGaplessDecoder_nativeResetAfterSeek(JNIEnv*, jclass, jlong handle) {
+Java_com_matrixplayer_audioengine_NativeGaplessDecoder_nativeResetAfterSeek(JNIEnv*, jclass, jlong handle) {
     auto* decoder = reinterpret_cast<GaplessDecoder*>(handle);
     if (decoder) decoder->resetAfterSeek();
 }

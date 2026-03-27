@@ -8,19 +8,19 @@
 extern "C" {
 
 JNIEXPORT jlong JNICALL
-Java_com_example_media_1player_NativePcmBuffer_nativeCreate(JNIEnv*, jclass, jint capacity) {
+Java_com_matrixplayer_audioengine_NativePcmBuffer_nativeCreate(JNIEnv*, jclass, jint capacity) {
     auto* buf = new NativePcmBuffer((size_t)capacity);
     return reinterpret_cast<jlong>(buf);
 }
 
 JNIEXPORT void JNICALL
-Java_com_example_media_1player_NativePcmBuffer_nativeDestroy(JNIEnv*, jclass, jlong handle) {
+Java_com_matrixplayer_audioengine_NativePcmBuffer_nativeDestroy(JNIEnv*, jclass, jlong handle) {
     auto* buf = reinterpret_cast<NativePcmBuffer*>(handle);
     delete buf;
 }
 
 JNIEXPORT jboolean JNICALL
-Java_com_example_media_1player_NativePcmBuffer_nativeWrite(JNIEnv* env, jclass,
+Java_com_matrixplayer_audioengine_NativePcmBuffer_nativeWrite(JNIEnv* env, jclass,
         jlong handle, jbyteArray data, jint offset, jint length) {
     auto* buf = reinterpret_cast<NativePcmBuffer*>(handle);
     if (!buf) return JNI_FALSE;
@@ -34,7 +34,7 @@ Java_com_example_media_1player_NativePcmBuffer_nativeWrite(JNIEnv* env, jclass,
 }
 
 JNIEXPORT jint JNICALL
-Java_com_example_media_1player_NativePcmBuffer_nativeRead(JNIEnv* env, jclass,
+Java_com_matrixplayer_audioengine_NativePcmBuffer_nativeRead(JNIEnv* env, jclass,
         jlong handle, jbyteArray dest, jint offset, jint maxLength) {
     auto* buf = reinterpret_cast<NativePcmBuffer*>(handle);
     if (!buf) return -1;
@@ -48,19 +48,19 @@ Java_com_example_media_1player_NativePcmBuffer_nativeRead(JNIEnv* env, jclass,
 }
 
 JNIEXPORT void JNICALL
-Java_com_example_media_1player_NativePcmBuffer_nativeFlush(JNIEnv*, jclass, jlong handle) {
+Java_com_matrixplayer_audioengine_NativePcmBuffer_nativeFlush(JNIEnv*, jclass, jlong handle) {
     auto* buf = reinterpret_cast<NativePcmBuffer*>(handle);
     if (buf) buf->flush();
 }
 
 JNIEXPORT void JNICALL
-Java_com_example_media_1player_NativePcmBuffer_nativeSignalEnd(JNIEnv*, jclass, jlong handle) {
+Java_com_matrixplayer_audioengine_NativePcmBuffer_nativeSignalEnd(JNIEnv*, jclass, jlong handle) {
     auto* buf = reinterpret_cast<NativePcmBuffer*>(handle);
     if (buf) buf->signalEnd();
 }
 
 JNIEXPORT void JNICALL
-Java_com_example_media_1player_NativePcmBuffer_nativeReset(JNIEnv*, jclass, jlong handle) {
+Java_com_matrixplayer_audioengine_NativePcmBuffer_nativeReset(JNIEnv*, jclass, jlong handle) {
     auto* buf = reinterpret_cast<NativePcmBuffer*>(handle);
     if (buf) buf->reset();
 }
