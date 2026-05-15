@@ -23,6 +23,10 @@ public class AppSettings {
     private static final String KEY_EQ_PROFILE_NAME = "eq_profile_name";
     private static final String KEY_EQ_PROFILE_SOURCE = "eq_profile_source";
     private static final String KEY_EQ_PROFILE_FORM = "eq_profile_form";
+    private static final String KEY_DSD_PLAYBACK_MODE = "dsd_playback_mode";
+    private static final String KEY_VOLUME_MODE = "volume_mode";
+    private static final String KEY_SHOW_VOLUME_WARNING = "show_volume_warning";
+    private static final String KEY_VOLUME_INTRO_SHOWN = "volume_intro_shown";
 
     private final SharedPreferences prefs;
 
@@ -129,5 +133,56 @@ public class AppSettings {
                 .putString(KEY_EQ_PROFILE_SOURCE, source)
                 .putString(KEY_EQ_PROFILE_FORM, form)
                 .apply();
+    }
+
+    public String getDsdPlaybackMode() {
+        return prefs.getString(KEY_DSD_PLAYBACK_MODE, "AUTO");
+    }
+
+    public void setDsdPlaybackMode(String mode) {
+        Log.d(TAG, "setDsdPlaybackMode: " + mode);
+        prefs.edit().putString(KEY_DSD_PLAYBACK_MODE, mode).apply();
+    }
+
+    public String getVolumeMode() {
+        return prefs.getString(KEY_VOLUME_MODE, "AUTO");
+    }
+
+    public void setVolumeMode(String mode) {
+        Log.d(TAG, "setVolumeMode: " + mode);
+        prefs.edit().putString(KEY_VOLUME_MODE, mode).apply();
+    }
+
+    public boolean isShowVolumeWarning() {
+        return prefs.getBoolean(KEY_SHOW_VOLUME_WARNING, true);
+    }
+
+    public void setShowVolumeWarning(boolean enabled) {
+        prefs.edit().putBoolean(KEY_SHOW_VOLUME_WARNING, enabled).apply();
+    }
+
+    public boolean isVolumeIntroShown() {
+        return prefs.getBoolean(KEY_VOLUME_INTRO_SHOWN, false);
+    }
+
+    public void setVolumeIntroShown(boolean shown) {
+        prefs.edit().putBoolean(KEY_VOLUME_INTRO_SHOWN, shown).apply();
+    }
+
+    // Per-DAC volume memory. Keyed by USB VID:PID so the user's level is
+    // restored when reconnecting the same dongle (and isolated per DAC).
+    private static String dacVolumeKey(int vid, int pid) {
+        return "volume_dac_" + vid + "_" + pid;
+    }
+
+    public float getVolumeForDac(int vid, int pid) {
+        return prefs.getFloat(dacVolumeKey(vid, pid), 0f);
+    }
+
+    public void setVolumeForDac(int vid, int pid, float linear01) {
+        if (Float.isNaN(linear01)) linear01 = 0f;
+        if (linear01 < 0f) linear01 = 0f;
+        if (linear01 > 1f) linear01 = 1f;
+        prefs.edit().putFloat(dacVolumeKey(vid, pid), linear01).apply();
     }
 }

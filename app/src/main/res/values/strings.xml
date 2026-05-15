@@ -27,6 +27,25 @@
     <string name="usb_permission_denied">USB permission denied</string>
     <string name="usb_rate_unsupported">Sample rate not supported by DAC, using speaker</string>
 
+    <!-- Volume -->
+    <string name="volume_icon_desc">Volume</string>
+    <string name="volume_muted">muted</string>
+    <string name="volume_db_fmt">%1$+.1f dB</string>
+    <string name="setting_volume_mode">Volume control mode</string>
+    <string name="setting_volume_mode_desc">How volume is applied to the DAC output</string>
+    <string name="volume_mode_auto">Auto</string>
+    <string name="volume_mode_hardware">Hardware (DAC Feature Unit)</string>
+    <string name="volume_mode_software">Software (PCM only)</string>
+    <string name="volume_mode_external">External (DAC at unity)</string>
+    <string name="setting_show_volume_warning">Volume warning on DAC connect</string>
+    <string name="setting_show_volume_warning_desc">Remind you when a DAC is plugged in that volume starts at silence</string>
+    <string name="volume_intro_title">Volume safety</string>
+    <string name="volume_intro_message">For your hearing\'s safety, the app starts at silence every time a USB DAC is connected. Raise the volume gradually. If you changed headphones since last session, double-check before raising — sensitivity varies dramatically between models.</string>
+    <string name="volume_intro_ok">Got it</string>
+    <string name="volume_connect_banner_fmt">DAC connected — volume restored to %1$d%%. Double-check before raising.</string>
+    <string name="volume_app_start_reminder_fmt">Volume: %1$d%%. If you changed headphones since last time, check before raising — sensitivities vary a lot.</string>
+    <string name="menu_quit">Quit</string>
+
     <string name="setting_bt_codec">Bluetooth Codec</string>
     <string name="setting_bt_codec_desc">Per-device A2DP codec configuration</string>
     <string name="setting_bt_codec_unavailable">Not available on this device</string>
@@ -101,6 +120,9 @@
     <string name="setting_tidal_quality_desc">SMART auto-selects based on output (USB DAC: hi-res lossless, LDAC: lossless, AAC/SBC: high). Manual: HI_RES_LOSSLESS | LOSSLESS | HIGH | LOW</string>
     <string name="setting_qobuz_quality">Qobuz audio quality</string>
     <string name="setting_qobuz_quality_desc">SMART auto-selects (USB DAC: ultra hi-res, otherwise: lossless). Manual: ULTRA_HI_RES | HI_RES | LOSSLESS | MP3</string>
+
+    <string name="setting_dsd_mode">DSD playback mode</string>
+    <string name="setting_dsd_mode_desc">AUTO tries Native, falls back to DoP. DOP works on all DSD-capable USB DACs. NATIVE sends raw DSD (DAC-dependent). PCM converts to 16-bit PCM for speaker/Bluetooth.</string>
 
     <!-- Qobuz -->
     <string name="tab_qobuz">Qobuz</string>

@@ -14,4 +14,9 @@
         android:title="@string/settings_title"
         app:showAsAction="always" />
 
+    <item
+        android:id="@+id/action_quit"
+        android:title="@string/menu_quit"
+        app:showAsAction="never" />
+
 </menu>

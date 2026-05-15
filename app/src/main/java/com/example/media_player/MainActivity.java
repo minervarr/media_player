@@ -106,6 +106,29 @@ public class MainActivity extends AppCompatActivity
             playbackController = (MusicService.PlaybackController) service;
             serviceBound = true;
             playbackController.setCallback(MainActivity.this);
+            // Push the current volume-mode preference now that we have a binder.
+            // onResume() may have fired before this point (binding is async), so
+            // pushing here is the only place we can be sure playbackController
+            // exists when the user just returned from SettingsActivity.
+            if (settings != null) {
+                playbackController.setVolumeMode(
+                        com.nerio.audioengine.VolumeMode.fromString(settings.getVolumeMode()));
+            }
+            // Sync slider with the service's source-of-truth volume.
+            float vol = playbackController.getVolume();
+            binding.seekbarVolume.setProgress(Math.round(vol * binding.seekbarVolume.getMax()));
+            updateVolumeLabel();
+
+            // Cold-start headphone reminder: shown once per app launch
+            // (suppressed during the first-launch intro dialog flow).
+            if (shouldShowAppStartReminder) {
+                shouldShowAppStartReminder = false;
+                int pct = Math.round(vol * 100f);
+                com.google.android.material.snackbar.Snackbar.make(
+                        binding.getRoot(),
+                        getString(R.string.volume_app_start_reminder_fmt, pct),
+                        com.google.android.material.snackbar.Snackbar.LENGTH_LONG).show();
+            }
             restoreUiFromService();
         }
 
@@ -118,6 +141,39 @@ public class MainActivity extends AppCompatActivity
     };
 
     private final Handler seekHandler = new Handler(Looper.getMainLooper());
+    private final Handler volumeOverlayHandler = new Handler(Looper.getMainLooper());
+
+    // True between MainActivity.onCreate (cold launch) and the first
+    // onServiceConnected -- so we can fire the headphone reminder Snackbar
+    // exactly once per app start. Rotation / recreation does NOT retrigger
+    // because we gate on savedInstanceState == null.
+    private boolean shouldShowAppStartReminder;
+    private final Runnable hideVolumeOverlay = () -> {
+        if (binding != null && binding.volumeOverlay.getVisibility() == android.view.View.VISIBLE) {
+            binding.volumeOverlay.animate()
+                    .alpha(0f)
+                    .translationY(-binding.volumeOverlay.getHeight() / 2f)
+                    .setDuration(180)
+                    .withEndAction(() -> binding.volumeOverlay.setVisibility(android.view.View.GONE))
+                    .start();
+        }
+    };
+
+    private void showVolumeOverlay() {
+        if (binding == null) return;
+        volumeOverlayHandler.removeCallbacks(hideVolumeOverlay);
+        if (binding.volumeOverlay.getVisibility() != android.view.View.VISIBLE) {
+            binding.volumeOverlay.setAlpha(0f);
+            binding.volumeOverlay.setTranslationY(-binding.volumeOverlay.getHeight() / 2f);
+            binding.volumeOverlay.setVisibility(android.view.View.VISIBLE);
+            binding.volumeOverlay.animate()
+                    .alpha(1f)
+                    .translationY(0f)
+                    .setDuration(180)
+                    .start();
+        }
+        volumeOverlayHandler.postDelayed(hideVolumeOverlay, 3000);
+    }
     private final Runnable seekUpdater = new Runnable() {
         @Override
         public void run() {
@@ -178,6 +234,61 @@ public class MainActivity extends AppCompatActivity
             bluetoothCodecManager.setListener(this);
             bluetoothCodecManager.register();
         }
+
+        // First-launch safety intro. Shown once; flag stored in SharedPreferences.
+        if (!settings.isVolumeIntroShown()) {
+            new androidx.appcompat.app.AlertDialog.Builder(this)
+                    .setTitle(R.string.volume_intro_title)
+                    .setMessage(R.string.volume_intro_message)
+                    .setCancelable(false)
+                    .setPositiveButton(R.string.volume_intro_ok, (d, w) -> {
+                        settings.setVolumeIntroShown(true);
+                    })
+                    .show();
+        } else {
+            // Lighter app-start headphone reminder. Only on cold launch
+            // (savedInstanceState==null) so a config change doesn't retrigger.
+            shouldShowAppStartReminder = savedInstanceState == null;
+        }
+    }
+
+    @Override
+    public boolean dispatchKeyEvent(android.view.KeyEvent event) {
+        // Intercept volume up/down before they reach the system MediaSession
+        // routing. onKeyDown fires later in the chain and can be short-circuited
+        // by the system slider in some cases; dispatchKeyEvent is more reliable.
+        // We only handle ACTION_DOWN -- ACTION_UP should still propagate so
+        // long-press auto-repeat works normally.
+        final int keyCode = event.getKeyCode();
+        final boolean isVolumeKey = keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP
+                || keyCode == android.view.KeyEvent.KEYCODE_VOLUME_DOWN;
+        if (isVolumeKey && playbackController != null
+                && playbackController.isUsbOutputActive()) {
+            com.nerio.audioengine.VolumeMode mode = playbackController.getEffectiveVolumeMode();
+            if (mode != com.nerio.audioengine.VolumeMode.EXTERNAL) {
+                if (event.getAction() == android.view.KeyEvent.ACTION_DOWN) {
+                    double db = playbackController.getVolumeDb();
+                    if (Double.isInfinite(db) && db < 0) {
+                        db = -60.0;  // floor on the first up-press
+                    }
+                    db += (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP) ? 1.0 : -1.0;
+                    if (db > 0.0) db = 0.0;
+                    if (db < -60.0) db = -60.0;
+                    float linear = playbackController.dbToLinear(db);
+                    if (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_DOWN
+                            && linear <= 0.01f) {
+                        linear = 0f;  // snap to mute below 1%
+                    }
+                    playbackController.setVolume(linear);
+                    binding.seekbarVolume.setProgress(
+                            Math.round(linear * binding.seekbarVolume.getMax()));
+                    updateVolumeLabel();
+                    showVolumeOverlay();
+                }
+                return true;  // consume both ACTION_DOWN and ACTION_UP
+            }
+        }
+        return super.dispatchKeyEvent(event);
     }
 
     @Override
@@ -186,6 +297,19 @@ public class MainActivity extends AppCompatActivity
         Log.d(TAG, "onStart: binding to MusicService");
         Intent intent = new Intent(this, MusicService.class);
         bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE);
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // Push the current volume mode setting to the running engine. Required
+        // because SettingsActivity only writes to SharedPreferences; without this
+        // call the engine only picks up changes at the next play() configure().
+        if (playbackController != null && settings != null) {
+            com.nerio.audioengine.VolumeMode mode =
+                    com.nerio.audioengine.VolumeMode.fromString(settings.getVolumeMode());
+            playbackController.setVolumeMode(mode);
+        }
     }
 
     @Override
@@ -234,7 +358,26 @@ public class MainActivity extends AppCompatActivity
             settingsLauncher.launch(new Intent(this, SettingsActivity.class));
             return true;
         }
+        if (item.getItemId() == R.id.action_quit) {
+            quitApp();
+            return true;
+        }
         return super.onOptionsItemSelected(item);
+    }
+
+    private void quitApp() {
+        // Drop our service binding before stopping the service, so the system
+        // doesn't keep it alive on our behalf. onDestroy() in MusicService will
+        // release the audio engine (which stops playback) and dismiss the
+        // foreground notification.
+        if (serviceBound) {
+            if (playbackController != null) playbackController.setCallback(null);
+            unbindService(serviceConnection);
+            serviceBound = false;
+            playbackController = null;
+        }
+        stopService(new Intent(this, MusicService.class));
+        finishAndRemoveTask();
     }
 
     private void toggleSearchFragment() {
@@ -382,6 +525,38 @@ public class MainActivity extends AppCompatActivity
                 }
             }
         });
+
+        binding.seekbarVolume.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                if (!fromUser) return;
+                if (playbackController == null) return;
+                float linear = progress / (float) seekBar.getMax();
+                playbackController.setVolume(linear);
+                updateVolumeLabel();
+                // Reset auto-hide while the user is dragging.
+                showVolumeOverlay();
+            }
+            @Override public void onStartTrackingTouch(SeekBar seekBar) {
+                volumeOverlayHandler.removeCallbacks(hideVolumeOverlay);
+            }
+            @Override public void onStopTrackingTouch(SeekBar seekBar) {
+                showVolumeOverlay();
+            }
+        });
+    }
+
+    private void updateVolumeLabel() {
+        if (playbackController == null) {
+            binding.tvVolumeLabel.setText(R.string.volume_muted);
+            return;
+        }
+        double db = playbackController.getVolumeDb();
+        if (Double.isInfinite(db) && db < 0) {
+            binding.tvVolumeLabel.setText(R.string.volume_muted);
+        } else {
+            binding.tvVolumeLabel.setText(getString(R.string.volume_db_fmt, db));
+        }
     }
 
     // -- Restore UI after rebind --
@@ -474,6 +649,32 @@ public class MainActivity extends AppCompatActivity
     @Override
     public void onOutputChanged() {
         updateOutputInfo();
+        // Output changed (e.g., new track using the existing USB session).
+        // Sync the slider so the overlay shows the current persisted volume.
+        // No banner here -- the banner belongs to actual hardware attach,
+        // handled by onUsbDacFreshlyConnected().
+        if (playbackController != null) {
+            float vol = playbackController.getVolume();
+            binding.seekbarVolume.setProgress(Math.round(vol * binding.seekbarVolume.getMax()));
+            updateVolumeLabel();
+        }
+    }
+
+    @Override
+    public void onUsbDacFreshlyConnected() {
+        // Real hardware attach: sync slider to the restored per-DAC volume and
+        // fire the safety banner with the restored percentage.
+        if (binding == null) return;
+        float vol = (playbackController != null) ? playbackController.getVolume() : 0f;
+        binding.seekbarVolume.setProgress(Math.round(vol * binding.seekbarVolume.getMax()));
+        updateVolumeLabel();
+        if (settings != null && settings.isShowVolumeWarning()) {
+            int pct = Math.round(vol * 100f);
+            com.google.android.material.snackbar.Snackbar.make(
+                    binding.getRoot(),
+                    getString(R.string.volume_connect_banner_fmt, pct),
+                    com.google.android.material.snackbar.Snackbar.LENGTH_LONG).show();
+        }
     }
 
     @Override
@@ -1119,7 +1320,9 @@ public class MainActivity extends AppCompatActivity
 
         if (info.isDsd) {
             info.dsdPcmRate = playbackController.getSampleRate();
-            info.dsdPlaybackMode = playbackController.isDopMode() ? "DoP" : "Native";
+            String pbMode = playbackController.getDsdPlaybackMode();
+            info.dsdPlaybackMode = (pbMode != null) ? pbMode
+                    : (playbackController.isDopMode() ? "DoP" : "Native");
             int dr = info.dsdRate;
             if (dr == 2822400) info.sourceFormat = "DSD64";
             else if (dr == 5644800) info.sourceFormat = "DSD128";

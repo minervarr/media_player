@@ -94,6 +94,37 @@ public class SettingsActivity extends AppCompatActivity {
                     .show();
         });
 
+        TextView tvDsdMode = findViewById(R.id.tv_dsd_mode);
+        tvDsdMode.setText(settings.getDsdPlaybackMode());
+        tvDsdMode.setOnClickListener(v -> {
+            String[] options = {"AUTO", "NATIVE", "DOP", "PCM"};
+            new AlertDialog.Builder(this)
+                    .setTitle(R.string.setting_dsd_mode)
+                    .setItems(options, (dialog, which) -> {
+                        settings.setDsdPlaybackMode(options[which]);
+                        tvDsdMode.setText(options[which]);
+                    })
+                    .show();
+        });
+
+        TextView tvVolumeMode = findViewById(R.id.tv_volume_mode);
+        tvVolumeMode.setText(settings.getVolumeMode());
+        tvVolumeMode.setOnClickListener(v -> {
+            String[] options = {"AUTO", "HARDWARE", "SOFTWARE", "EXTERNAL"};
+            new AlertDialog.Builder(this)
+                    .setTitle(R.string.setting_volume_mode)
+                    .setItems(options, (dialog, which) -> {
+                        settings.setVolumeMode(options[which]);
+                        tvVolumeMode.setText(options[which]);
+                    })
+                    .show();
+        });
+
+        SwitchCompat switchVolumeWarning = findViewById(R.id.switch_show_volume_warning);
+        switchVolumeWarning.setChecked(settings.isShowVolumeWarning());
+        switchVolumeWarning.setOnCheckedChangeListener((buttonView, isChecked) ->
+                settings.setShowVolumeWarning(isChecked));
+
         // Headphone EQ
         eqProfileLauncher = registerForActivityResult(
                 new ActivityResultContracts.StartActivityForResult(), result -> {

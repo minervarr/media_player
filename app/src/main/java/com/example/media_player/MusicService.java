@@ -100,6 +100,17 @@ public class MusicService extends Service implements UsbAudioManager.UsbAudioLis
     private boolean pausedByFocusLoss;
 
     private AppSettings settings;
+
+    // Session-level volume state. Survives AudioEngine instance churn (each
+    // track creates a new engine -- without this, volume would reset to 0
+    // every track change).
+    private float pendingVolume = 0f;
+    private com.nerio.audioengine.VolumeMode pendingVolumeMode =
+            com.nerio.audioengine.VolumeMode.AUTO;
+    // Currently-connected USB DAC identifiers, used to scope volume persistence.
+    // -1 means no DAC connected -- changes to pendingVolume are RAM-only then.
+    private int currentDacVid = -1;
+    private int currentDacPid = -1;
     private TidalAuth tidalAuth;
     private TidalApi tidalApi;
     private final ExecutorService tidalExecutor = Executors.newSingleThreadExecutor();
@@ -164,6 +175,9 @@ public class MusicService extends Service implements UsbAudioManager.UsbAudioLis
         void onError(String message);
         void onBluetoothEqPrompt(String deviceName, String mac,
                                   BluetoothEqMatcher.MatchResult matchResult);
+        /** Fired only when a USB DAC is physically attached (hardware event),
+         *  not on every track that reuses the existing USB output. */
+        default void onUsbDacFreshlyConnected() {}
     }
 
     public class PlaybackController extends Binder {
@@ -305,6 +319,18 @@ public class MusicService extends Service implements UsbAudioManager.UsbAudioLis
             return audioEngine != null && audioEngine.isDopMode();
         }
 
+        public String getDsdPlaybackMode() {
+            if (audioEngine == null) return null;
+            com.nerio.audioengine.DsdMode m = audioEngine.getActiveDsdMode();
+            if (m == null) return null;
+            switch (m) {
+                case NATIVE: return "Native";
+                case DOP:    return "DoP";
+                case PCM:    return "PCM";
+                default:     return null;
+            }
+        }
+
         public String getMime() {
             return audioEngine != null ? audioEngine.getMime() : null;
         }
@@ -319,6 +345,49 @@ public class MusicService extends Service implements UsbAudioManager.UsbAudioLis
 
         public boolean isUsbOutputActive() {
             return usbOutputActive;
+        }
+
+        // === Volume passthroughs ===
+
+        public void setVolume(float linear01) {
+            pendingVolume = linear01;
+            // Persist per-DAC so reconnecting the same dongle restores the level.
+            // SharedPreferences.apply() is async and very cheap.
+            if (currentDacVid >= 0 && currentDacPid >= 0) {
+                settings.setVolumeForDac(currentDacVid, currentDacPid, linear01);
+            }
+            if (audioEngine != null) audioEngine.setVolume(linear01);
+        }
+
+        public float getVolume() {
+            // Source of truth is the service-level state -- the engine may be
+            // mid-construction or torn down between tracks.
+            return pendingVolume;
+        }
+
+        public void setVolumeMode(com.nerio.audioengine.VolumeMode mode) {
+            pendingVolumeMode = (mode != null) ? mode : com.nerio.audioengine.VolumeMode.AUTO;
+            if (audioEngine != null) audioEngine.setVolumeMode(pendingVolumeMode);
+        }
+
+        public boolean hasHardwareVolume() {
+            return audioEngine != null && audioEngine.hasHardwareVolume();
+        }
+
+        public double getVolumeDb() {
+            return audioEngine != null
+                    ? audioEngine.getVolumeDb()
+                    : Double.NEGATIVE_INFINITY;
+        }
+
+        public float dbToLinear(double db) {
+            return audioEngine != null ? audioEngine.dbToLinear(db) : 0f;
+        }
+
+        public com.nerio.audioengine.VolumeMode getEffectiveVolumeMode() {
+            return audioEngine != null
+                    ? audioEngine.getEffectiveVolumeMode()
+                    : com.nerio.audioengine.VolumeMode.SOFTWARE;
         }
 
         public TidalModels.StreamInfo getLastTidalStreamInfo() {
@@ -401,6 +470,7 @@ public class MusicService extends Service implements UsbAudioManager.UsbAudioLis
         createNotificationChannel();
 
         settings = new AppSettings(this);
+        pendingVolumeMode = com.nerio.audioengine.VolumeMode.fromString(settings.getVolumeMode());
         audioManager = (AudioManager) getSystemService(AUDIO_SERVICE);
         tidalAuth = new TidalAuth(this);
         tidalApi = new TidalApi(tidalAuth);
@@ -423,6 +493,9 @@ public class MusicService extends Service implements UsbAudioManager.UsbAudioLis
     @Override
     public void onDestroy() {
         Log.d(TAG, "onDestroy");
+        // Dismiss the foreground notification immediately so the user sees the
+        // app close cleanly when they tap Quit.
+        stopForeground(STOP_FOREGROUND_REMOVE);
         unregisterBtConnectionReceiver();
         unregisterNoisyReceiver();
         if (mediaSession != null) {
@@ -531,6 +604,12 @@ public class MusicService extends Service implements UsbAudioManager.UsbAudioLis
         queueDao.saveQueue(currentQueue, currentQueueIndex, posMs, true);
 
         audioEngine = new AudioEngine();
+        audioEngine.setDsdMode(com.nerio.audioengine.DsdMode.fromString(settings.getDsdPlaybackMode()));
+        // Restore session-level volume so a track change doesn't lose user state.
+        // pendingVolumeMode and pendingVolume are seeded in onCreate and updated
+        // by every PlaybackController.setVolume/setVolumeMode call.
+        audioEngine.setVolumeMode(pendingVolumeMode);
+        audioEngine.setVolume(pendingVolume);
         configureEq(track);
         audioEngine.setOnPreparedListener(engine ->
                 mainHandler.post(() -> {
@@ -541,12 +620,13 @@ public class MusicService extends Service implements UsbAudioManager.UsbAudioLis
                                 audioEngine.getSampleRate(), audioEngine.getChannelCount(),
                                 audioEngine.getEncoding());
                     }
-                    if (audioEngine != null && audioEngine.isDsd() && !usbOutputActive) {
+                    if (audioEngine != null && audioEngine.isDsd() && !usbOutputActive
+                            && audioEngine.getActiveDsdMode() != com.nerio.audioengine.DsdMode.PCM) {
                         UsbDevice dac = usbAudioManager.getConnectedDac();
                         if (dac != null && usbAudioManager.hasPermission(dac)) {
                             switchToUsbOutput(dac);
                         } else {
-                            fireError("DSD requires USB DAC");
+                            fireError("DSD requires USB DAC (or set DSD mode to PCM in Settings)");
                             releasePlayer();
                             return;
                         }
@@ -1228,6 +1308,13 @@ public class MusicService extends Service implements UsbAudioManager.UsbAudioLis
                 + " exclusiveMode=" + settings.isUsbExclusiveMode()
                 + " hasPermission=" + usbAudioManager.hasPermission(device)
                 + " audioEngine=" + (audioEngine != null));
+        // Restore the per-DAC saved volume. Brand-new DACs default to 0 (no
+        // saved entry). Track changes don't run this path -- only real
+        // hardware-attach events do.
+        currentDacVid = device.getVendorId();
+        currentDacPid = device.getProductId();
+        pendingVolume = settings.getVolumeForDac(currentDacVid, currentDacPid);
+        if (audioEngine != null) audioEngine.setVolume(pendingVolume);
         mainHandler.post(() -> {
             if (settings.isUsbExclusiveMode() && !usbAudioManager.hasPermission(device)) {
                 Log.d(TAG, "onUsbDacConnected: requesting permission");
@@ -1237,6 +1324,10 @@ public class MusicService extends Service implements UsbAudioManager.UsbAudioLis
                 switchToUsbOutput(device);
             }
             fireCallback(() -> { if (callback != null) callback.onOutputChanged(); });
+            // Hardware-attach event: surface the safety banner exactly once.
+            // (onOutputChanged also fires on every track that uses the USB output;
+            // we don't want to spam the banner there.)
+            fireCallback(() -> { if (callback != null) callback.onUsbDacFreshlyConnected(); });
         });
     }
 
@@ -1244,6 +1335,9 @@ public class MusicService extends Service implements UsbAudioManager.UsbAudioLis
     public void onUsbDacDisconnected() {
         Log.d(TAG, "onUsbDacDisconnected: usbOutputActive=" + usbOutputActive
                 + " audioEngine=" + (audioEngine != null));
+        // No DAC -> volume changes from now on stay in RAM only.
+        currentDacVid = -1;
+        currentDacPid = -1;
         usbExecutor.execute(() -> {
             if (usbOutputActive && audioEngine != null) {
                 if (audioEngine.isDsd()) {
