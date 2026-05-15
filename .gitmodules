@@ -1,3 +1,3 @@
 [submodule "audioengine"]
 	path = audioengine
-	url = /home/nerio/Files/nerio_handmade/android/audio-engine
+	url = https://github.com/minervarr/audio_engine.git
