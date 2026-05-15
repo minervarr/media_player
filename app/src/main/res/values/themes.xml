@@ -11,11 +11,31 @@
         <item name="android:navigationBarColor">@color/bg_primary</item>
         <item name="android:fontFamily">@font/cmu_serif</item>
         <item name="fontFamily">@font/cmu_serif</item>
+        <item name="tabStyle">@style/Widget.MatrixPlayer.Tab</item>
+    </style>
+
+    <style name="Widget.MatrixPlayer.Tab" parent="Widget.MaterialComponents.TabLayout">
+        <item name="tabIndicator">@drawable/bg_tab_indicator</item>
+        <item name="tabIndicatorFullWidth">false</item>
+        <item name="tabIndicatorHeight">2dp</item>
+        <item name="tabRippleColor">@color/green_muted</item>
+        <item name="tabTextColor">@color/text_secondary</item>
+        <item name="tabSelectedTextColor">@color/green_bright</item>
+    </style>
+
+    <style name="RoundedCorner6" parent="">
+        <item name="cornerSize">6dp</item>
+    </style>
+
+    <style name="RoundedCorner4" parent="">
+        <item name="cornerSize">4dp</item>
     </style>
 
     <style name="Theme.Media_player.Dialog" parent="Theme.MaterialComponents.DayNight.Dialog">
-        <item name="android:windowBackground">@color/bg_surface</item>
+        <item name="android:windowBackground">@color/bg_elevated</item>
         <item name="colorPrimary">@color/green_primary</item>
         <item name="colorSecondary">@color/green_bright</item>
+        <item name="android:fontFamily">@font/cmu_serif</item>
+        <item name="fontFamily">@font/cmu_serif</item>
     </style>
 </resources>

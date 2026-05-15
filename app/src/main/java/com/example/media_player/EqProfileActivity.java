@@ -16,13 +16,21 @@ import androidx.appcompat.widget.Toolbar;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
-import com.matrixplayer.audioengine.EqProfile;
+import com.nerio.audioengine.EqProfile;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
 public class EqProfileActivity extends AppCompatActivity {
+
+    public static final String EXTRA_PICK_MODE = "pick_mode";
+    public static final String EXTRA_PRESELECTED_NAME = "preselected_name";
+    public static final String EXTRA_PRESELECTED_SOURCE = "preselected_source";
+    public static final String EXTRA_PRESELECTED_FORM = "preselected_form";
+    public static final String RESULT_PROFILE_NAME = "result_profile_name";
+    public static final String RESULT_PROFILE_SOURCE = "result_profile_source";
+    public static final String RESULT_PROFILE_FORM = "result_profile_form";
 
     private AppSettings settings;
     private List<Object> displayItems = new ArrayList<>(); // String (header) or EqProfile
@@ -31,6 +39,7 @@ public class EqProfileActivity extends AppCompatActivity {
     private String selectedName;
     private String selectedSource;
     private String selectedForm;
+    private boolean pickMode;
 
     private static final int TYPE_HEADER = 0;
     private static final int TYPE_PROFILE = 1;
@@ -50,9 +59,19 @@ public class EqProfileActivity extends AppCompatActivity {
         }
 
         settings = new AppSettings(this);
-        selectedName = settings.getEqProfileName();
-        selectedSource = settings.getEqProfileSource();
-        selectedForm = settings.getEqProfileForm();
+        pickMode = getIntent().getBooleanExtra(EXTRA_PICK_MODE, false);
+        if (pickMode) {
+            selectedName = getIntent().getStringExtra(EXTRA_PRESELECTED_NAME);
+            selectedSource = getIntent().getStringExtra(EXTRA_PRESELECTED_SOURCE);
+            selectedForm = getIntent().getStringExtra(EXTRA_PRESELECTED_FORM);
+            if (selectedName == null) selectedName = "";
+            if (selectedSource == null) selectedSource = "";
+            if (selectedForm == null) selectedForm = "";
+        } else {
+            selectedName = settings.getEqProfileName();
+            selectedSource = settings.getEqProfileSource();
+            selectedForm = settings.getEqProfileForm();
+        }
 
         RecyclerView recycler = findViewById(R.id.eq_recycler);
         recycler.setLayoutManager(new LinearLayoutManager(this));
@@ -133,6 +152,21 @@ public class EqProfileActivity extends AppCompatActivity {
     }
 
     private void selectProfile(EqProfile profile) {
+        if (pickMode) {
+            android.content.Intent data = new android.content.Intent();
+            if (profile != null) {
+                data.putExtra(RESULT_PROFILE_NAME, profile.name);
+                data.putExtra(RESULT_PROFILE_SOURCE, profile.source);
+                data.putExtra(RESULT_PROFILE_FORM, profile.form);
+            } else {
+                data.putExtra(RESULT_PROFILE_NAME, "");
+                data.putExtra(RESULT_PROFILE_SOURCE, "");
+                data.putExtra(RESULT_PROFILE_FORM, "");
+            }
+            setResult(RESULT_OK, data);
+            finish();
+            return;
+        }
         if (profile == null) {
             selectedName = "";
             selectedSource = "";

@@ -127,8 +127,9 @@ public class ArtworkCache {
                 if (bitmap != null) {
                     cache.put(fullKey, bitmap);
                     if (diskCache != null) {
-                        boolean isTidal = artworkKey.startsWith("tidal:");
-                        long expiresAt = isTidal
+                        boolean isOnline = artworkKey.startsWith("tidal:")
+                                || artworkKey.startsWith("qobuz:");
+                        long expiresAt = isOnline
                                 ? System.currentTimeMillis() + 7L * 24 * 60 * 60 * 1000
                                 : 0;
                         diskCache.put(fullKey, bitmap, expiresAt);
@@ -179,8 +180,9 @@ public class ArtworkCache {
                     cache.put(artworkKey, bitmap);
                     // Write to disk cache
                     if (diskCache != null) {
-                        boolean isTidal = artworkKey.startsWith("tidal:");
-                        long expiresAt = isTidal
+                        boolean isOnline = artworkKey.startsWith("tidal:")
+                                || artworkKey.startsWith("qobuz:");
+                        long expiresAt = isOnline
                                 ? System.currentTimeMillis() + 7L * 24 * 60 * 60 * 1000
                                 : 0;
                         diskCache.put(artworkKey, bitmap, expiresAt);
@@ -201,6 +203,8 @@ public class ArtworkCache {
     private Bitmap resolve(String artworkKey, int sizePx) {
         if (artworkKey.startsWith("tidal:")) {
             return resolveTidalUrl(artworkKey.substring(6), sizePx);
+        } else if (artworkKey.startsWith("qobuz:")) {
+            return resolveDirectUrl(artworkKey.substring(6), sizePx);
         } else if (artworkKey.startsWith("album:")) {
             return resolveAlbum(artworkKey, sizePx);
         } else if (artworkKey.startsWith("folder:")) {
@@ -231,6 +235,43 @@ public class ArtworkCache {
         } catch (Exception e) {
             Log.w(TAG, "resolve tidal artwork failed: " + e.getMessage());
             return null;
+        }
+    }
+
+    private Bitmap resolveDirectUrl(String url, int sizePx) {
+        if (url == null || url.isEmpty() || "null".equals(url)) {
+            Log.w(TAG, "resolveDirectUrl: empty/invalid url");
+            return null;
+        }
+        HttpURLConnection conn = null;
+        try {
+            conn = (HttpURLConnection) new URL(url).openConnection();
+            conn.setConnectTimeout(10000);
+            conn.setReadTimeout(10000);
+            conn.setRequestProperty("User-Agent",
+                    "Mozilla/5.0 (Linux; Android) MatrixPlayer/1.0");
+            int code = conn.getResponseCode();
+            if (code != 200) {
+                Log.w(TAG, "resolveDirectUrl: HTTP " + code + " for " + url);
+                return null;
+            }
+            try (InputStream is = conn.getInputStream()) {
+                byte[] data = readStream(is);
+                Bitmap bmp = decodeSampled(data, sizePx);
+                if (bmp != null) {
+                    Log.d(TAG, "resolveDirectUrl: " + bmp.getWidth() + "x" + bmp.getHeight()
+                            + " from " + url);
+                } else {
+                    Log.w(TAG, "resolveDirectUrl: decode failed for " + url
+                            + " (" + data.length + " bytes)");
+                }
+                return bmp;
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "resolveDirectUrl failed for " + url + ": " + e.getMessage());
+            return null;
+        } finally {
+            if (conn != null) conn.disconnect();
         }
     }
 
@@ -447,9 +488,9 @@ public class ArtworkCache {
         Canvas canvas = new Canvas(placeholderBitmap);
         canvas.drawColor(0xFF000000);
         Paint borderPaint = new Paint();
-        borderPaint.setColor(0xFF00C853);
+        borderPaint.setColor(0xFF1B5E20);
         borderPaint.setStyle(Paint.Style.STROKE);
-        borderPaint.setStrokeWidth(2f);
+        borderPaint.setStrokeWidth(1f);
         canvas.drawRect(1, 1, size - 1, size - 1, borderPaint);
         return placeholderBitmap;
     }

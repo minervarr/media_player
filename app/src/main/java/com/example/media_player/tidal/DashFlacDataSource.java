@@ -30,6 +30,8 @@ public class DashFlacDataSource extends MediaDataSource {
     private static final int READ_TIMEOUT = 30000;
     private static final int DOWNLOAD_BUF_SIZE = 64 * 1024;
     private static final int PREFETCH_AHEAD = 4;
+    private static final int MAX_SEGMENT_RETRIES = 3;
+    private static final int RETRY_DELAY_MS = 500;
 
     private final String[] segmentUrls;
     private final File tempFile;
@@ -150,27 +152,41 @@ public class DashFlacDataSource extends MediaDataSource {
     }
 
     private byte[] downloadSegmentBytes(String segUrl) throws IOException {
-        HttpURLConnection conn = null;
-        try {
-            conn = (HttpURLConnection) new URL(segUrl).openConnection();
-            conn.setConnectTimeout(CONNECT_TIMEOUT);
-            conn.setReadTimeout(READ_TIMEOUT);
-            int code = conn.getResponseCode();
-            if (code != 200) {
-                throw new IOException("HTTP " + code + " downloading segment");
+        int attempts = 0;
+        while (true) {
+            if (closed) return new byte[0];
+            attempts++;
+            HttpURLConnection conn = null;
+            try {
+                conn = (HttpURLConnection) new URL(segUrl).openConnection();
+                conn.setConnectTimeout(CONNECT_TIMEOUT);
+                conn.setReadTimeout(READ_TIMEOUT);
+                int code = conn.getResponseCode();
+                if (code != 200) {
+                    if (attempts < MAX_SEGMENT_RETRIES) {
+                        Log.w(TAG, "Segment HTTP " + code + ", retry " + attempts);
+                        try { Thread.sleep(RETRY_DELAY_MS * attempts); } catch (InterruptedException e) { return new byte[0]; }
+                        continue;
+                    }
+                    throw new IOException("HTTP " + code + " downloading segment after " + attempts + " attempts");
+                }
+                ByteArrayOutputStream bos = new ByteArrayOutputStream();
+                InputStream is = conn.getInputStream();
+                byte[] buf = new byte[DOWNLOAD_BUF_SIZE];
+                int read;
+                while ((read = is.read(buf)) > 0) {
+                    if (closed) return new byte[0];
+                    bos.write(buf, 0, read);
+                }
+                is.close();
+                return bos.toByteArray();
+            } catch (IOException e) {
+                if (attempts >= MAX_SEGMENT_RETRIES) throw e;
+                Log.w(TAG, "Segment download retry " + attempts + ": " + e.getMessage());
+                try { Thread.sleep(RETRY_DELAY_MS * attempts); } catch (InterruptedException ie) { return new byte[0]; }
+            } finally {
+                if (conn != null) conn.disconnect();
             }
-            ByteArrayOutputStream bos = new ByteArrayOutputStream();
-            InputStream is = conn.getInputStream();
-            byte[] buf = new byte[DOWNLOAD_BUF_SIZE];
-            int read;
-            while ((read = is.read(buf)) > 0) {
-                if (closed) return new byte[0];
-                bos.write(buf, 0, read);
-            }
-            is.close();
-            return bos.toByteArray();
-        } finally {
-            if (conn != null) conn.disconnect();
         }
     }
 

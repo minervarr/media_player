@@ -26,6 +26,7 @@ import android.view.ViewGroup;
 import android.widget.SeekBar;
 import android.widget.Toast;
 
+import androidx.appcompat.app.AlertDialog;
 import androidx.annotation.NonNull;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
@@ -39,18 +40,23 @@ import androidx.fragment.app.FragmentManager;
 import androidx.fragment.app.FragmentTransaction;
 import androidx.interpolator.view.animation.FastOutSlowInInterpolator;
 
-import com.matrixplayer.audioengine.AudioOutput;
-import com.matrixplayer.audioengine.EqProfile;
-import com.matrixplayer.audioengine.SignalPathInfo;
-import com.matrixplayer.audioengine.UsbAudioOutput;
+import com.nerio.audioengine.AudioOutput;
+import com.nerio.audioengine.DffParser;
+import com.nerio.audioengine.DsfParser;
+import com.nerio.audioengine.EqProfile;
+import com.nerio.audioengine.SignalPathInfo;
+import com.nerio.audioengine.UsbAudioOutput;
 
 import com.example.media_player.databinding.ActivityMainBinding;
 import com.example.media_player.tidal.TidalAuth;
+import com.example.media_player.qobuz.QobuzAuth;
+import com.example.media_player.qobuz.QobuzFragment;
 import com.example.media_player.tidal.TidalFragment;
 import com.example.media_player.tidal.TidalModels;
 import com.google.android.material.tabs.TabLayout;
 
 import java.io.File;
+import java.io.RandomAccessFile;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -79,7 +85,7 @@ public class MainActivity extends AppCompatActivity
     private final List<Track> tracks = new ArrayList<>();
     private boolean isUserSeeking = false;
 
-    private final Fragment[] fragments = new Fragment[9];
+    private final Fragment[] fragments = new Fragment[10];
     private int currentTabIndex = 0;
     private SearchFragment searchFragment;
     private boolean searchVisible;
@@ -266,6 +272,7 @@ public class MainActivity extends AppCompatActivity
         binding.tabLayout.addTab(binding.tabLayout.newTab().setText(R.string.tab_artists));
         binding.tabLayout.addTab(binding.tabLayout.newTab().setText(R.string.tab_folders));
         binding.tabLayout.addTab(binding.tabLayout.newTab().setText(R.string.tab_tidal));
+        binding.tabLayout.addTab(binding.tabLayout.newTab().setText(R.string.tab_qobuz));
         binding.tabLayout.addTab(binding.tabLayout.newTab().setText(R.string.tab_stats));
 
         fragments[0] = new TracksFragment();
@@ -279,7 +286,11 @@ public class MainActivity extends AppCompatActivity
         TidalFragment tidalFragment = new TidalFragment();
         // TidalAuth will be set once service connects
         fragments[7] = tidalFragment;
-        fragments[8] = new StatsFragment();
+
+        QobuzFragment qobuzFragment = new QobuzFragment();
+        fragments[8] = qobuzFragment;
+
+        fragments[9] = new StatsFragment();
 
         searchFragment = new SearchFragment();
 
@@ -389,6 +400,12 @@ public class MainActivity extends AppCompatActivity
             ((TidalFragment) fragments[7]).setTidalAuth(tidalAuth);
         }
 
+        // Give QobuzAuth to QobuzFragment
+        QobuzAuth qobuzAuth = playbackController.getQobuzAuth();
+        if (qobuzAuth != null && fragments[8] instanceof QobuzFragment) {
+            ((QobuzFragment) fragments[8]).setQobuzAuth(qobuzAuth);
+        }
+
         Track track = playbackController.getCurrentTrack();
         if (track == null) {
             // Nothing playing
@@ -405,13 +422,8 @@ public class MainActivity extends AppCompatActivity
         binding.tvCurrentTime.setText(formatTime(playbackController.getCurrentPosition()));
 
         // Artwork
-        String artworkKey;
-        if (track.source == Track.Source.TIDAL && track.artworkUrl != null) {
-            artworkKey = "tidal:" + track.artworkUrl;
-        } else {
-            artworkKey = "album:" + track.albumId;
-        }
-        ArtworkCache.getInstance(this).loadArtwork(artworkKey, binding.ivNowPlayingArtwork, 144);
+        ArtworkCache.getInstance(this).loadArtwork(
+                resolveArtworkKey(track), binding.ivNowPlayingArtwork, 144);
 
         // Play/pause icon
         if (playbackController.isPlaying()) {
@@ -443,13 +455,8 @@ public class MainActivity extends AppCompatActivity
         binding.seekbar.setProgress(0);
         binding.btnPlayPause.setImageResource(R.drawable.ic_pause);
 
-        String artworkKey;
-        if (track.source == Track.Source.TIDAL && track.artworkUrl != null) {
-            artworkKey = "tidal:" + track.artworkUrl;
-        } else {
-            artworkKey = "album:" + track.albumId;
-        }
-        ArtworkCache.getInstance(this).loadArtwork(artworkKey, binding.ivNowPlayingArtwork, 144);
+        ArtworkCache.getInstance(this).loadArtwork(
+                resolveArtworkKey(track), binding.ivNowPlayingArtwork, 144);
 
         seekHandler.removeCallbacks(seekUpdater);
         seekHandler.post(seekUpdater);
@@ -479,6 +486,163 @@ public class MainActivity extends AppCompatActivity
         Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
         binding.btnPlayPause.setImageResource(R.drawable.ic_play);
         binding.signalPathView.setVisibility(View.GONE);
+    }
+
+    @Override
+    public void onBluetoothEqPrompt(String deviceName, String mac,
+                                     BluetoothEqMatcher.MatchResult matchResult) {
+        showBluetoothEqDialog(deviceName, mac, matchResult);
+    }
+
+    private void showBluetoothEqDialog(String deviceName, String mac,
+                                        BluetoothEqMatcher.MatchResult result) {
+        if (isFinishing() || isDestroyed()) return;
+
+        // Contextual ANC dialog
+        if (result.hasAncVariants() && !result.hasConnectionVariants()
+                && result.variantsByDimension.size() == 1) {
+            showAncDialog(deviceName, mac, result);
+            return;
+        }
+
+        // Contextual connection dialog
+        if (result.hasConnectionVariants() && !result.hasAncVariants()
+                && result.variantsByDimension.size() == 1) {
+            showConnectionDialog(deviceName, mac, result);
+            return;
+        }
+
+        // General list dialog
+        showProfileListDialog(deviceName, mac, result);
+    }
+
+    private void showAncDialog(String deviceName, String mac,
+                                BluetoothEqMatcher.MatchResult result) {
+        List<EqProfile> ancProfiles = result.variantsByDimension.get(BluetoothEqMatcher.DIM_ANC);
+        List<EqProfile> baseProfiles = result.baseProfiles;
+
+        // Build button labels and matching profiles
+        List<String> labels = new ArrayList<>();
+        List<EqProfile> choices = new ArrayList<>();
+
+        // Add base (no ANC qualifier) option if available
+        if (!baseProfiles.isEmpty()) {
+            labels.add("Default");
+            choices.add(BluetoothEqMatcher.pickPreferredSource(baseProfiles));
+        }
+
+        if (ancProfiles != null) {
+            // Group ANC variants by their variant text
+            java.util.LinkedHashMap<String, List<EqProfile>> groups = new java.util.LinkedHashMap<>();
+            for (EqProfile p : ancProfiles) {
+                String variant = BluetoothEqMatcher.extractVariant(p.name);
+                if (variant == null) variant = p.name;
+                List<EqProfile> g = groups.get(variant);
+                if (g == null) { g = new ArrayList<>(); groups.put(variant, g); }
+                g.add(p);
+            }
+            for (java.util.Map.Entry<String, List<EqProfile>> e : groups.entrySet()) {
+                labels.add(e.getKey());
+                choices.add(BluetoothEqMatcher.pickPreferredSource(e.getValue()));
+            }
+        }
+
+        String[] items = labels.toArray(new String[0]);
+        new AlertDialog.Builder(this)
+                .setTitle("EQ for " + deviceName)
+                .setItems(items, (dialog, which) -> {
+                    if (which >= 0 && which < choices.size() && playbackController != null) {
+                        playbackController.applyBluetoothEqChoice(mac, choices.get(which));
+                    }
+                })
+                .setNegativeButton("Skip", (dialog, which) -> {
+                    if (playbackController != null) playbackController.dismissBluetoothEqPrompt();
+                })
+                .setCancelable(true)
+                .show();
+    }
+
+    private void showConnectionDialog(String deviceName, String mac,
+                                       BluetoothEqMatcher.MatchResult result) {
+        List<EqProfile> connProfiles = result.variantsByDimension.get(BluetoothEqMatcher.DIM_CONNECTION);
+        List<EqProfile> baseProfiles = result.baseProfiles;
+
+        List<String> labels = new ArrayList<>();
+        List<EqProfile> choices = new ArrayList<>();
+
+        if (!baseProfiles.isEmpty()) {
+            labels.add("Default");
+            choices.add(BluetoothEqMatcher.pickPreferredSource(baseProfiles));
+        }
+
+        if (connProfiles != null) {
+            java.util.LinkedHashMap<String, List<EqProfile>> groups = new java.util.LinkedHashMap<>();
+            for (EqProfile p : connProfiles) {
+                String variant = BluetoothEqMatcher.extractVariant(p.name);
+                if (variant == null) variant = p.name;
+                List<EqProfile> g = groups.get(variant);
+                if (g == null) { g = new ArrayList<>(); groups.put(variant, g); }
+                g.add(p);
+            }
+            for (java.util.Map.Entry<String, List<EqProfile>> e : groups.entrySet()) {
+                labels.add(e.getKey());
+                choices.add(BluetoothEqMatcher.pickPreferredSource(e.getValue()));
+            }
+        }
+
+        String[] items = labels.toArray(new String[0]);
+        new AlertDialog.Builder(this)
+                .setTitle("EQ for " + deviceName)
+                .setItems(items, (dialog, which) -> {
+                    if (which >= 0 && which < choices.size() && playbackController != null) {
+                        playbackController.applyBluetoothEqChoice(mac, choices.get(which));
+                    }
+                })
+                .setNegativeButton("Skip", (dialog, which) -> {
+                    if (playbackController != null) playbackController.dismissBluetoothEqPrompt();
+                })
+                .setCancelable(true)
+                .show();
+    }
+
+    private void showProfileListDialog(String deviceName, String mac,
+                                        BluetoothEqMatcher.MatchResult result) {
+        // Deduplicate by picking preferred source per unique (name) combination
+        java.util.LinkedHashMap<String, EqProfile> deduped = new java.util.LinkedHashMap<>();
+        for (EqProfile p : result.allCandidates) {
+            EqProfile existing = deduped.get(p.name);
+            if (existing == null) {
+                deduped.put(p.name, p);
+            } else {
+                // Keep the one with better source ranking
+                List<EqProfile> pair = new ArrayList<>();
+                pair.add(existing);
+                pair.add(p);
+                deduped.put(p.name, BluetoothEqMatcher.pickPreferredSource(pair));
+            }
+        }
+
+        List<String> labels = new ArrayList<>();
+        List<EqProfile> choices = new ArrayList<>();
+        for (java.util.Map.Entry<String, EqProfile> e : deduped.entrySet()) {
+            EqProfile p = e.getValue();
+            labels.add(p.name + "  \u2014  " + p.source);
+            choices.add(p);
+        }
+
+        String[] items = labels.toArray(new String[0]);
+        new AlertDialog.Builder(this)
+                .setTitle("EQ profiles for " + deviceName)
+                .setItems(items, (dialog, which) -> {
+                    if (which >= 0 && which < choices.size() && playbackController != null) {
+                        playbackController.applyBluetoothEqChoice(mac, choices.get(which));
+                    }
+                })
+                .setNegativeButton("Skip", (dialog, which) -> {
+                    if (playbackController != null) playbackController.dismissBluetoothEqPrompt();
+                })
+                .setCancelable(true)
+                .show();
     }
 
     // -- Track scanning (stays in Activity) --
@@ -624,6 +788,12 @@ public class MainActivity extends AppCompatActivity
     }
 
     private Track extractTrackMetadata(File file) {
+        // DSF/DFF: use our own parsers (MediaMetadataRetriever can't handle DSD)
+        String lowerName = file.getName().toLowerCase(Locale.ROOT);
+        if (lowerName.endsWith(".dsf") || lowerName.endsWith(".dff")) {
+            return extractDsdMetadata(file);
+        }
+
         MediaMetadataRetriever mmr = new MediaMetadataRetriever();
         try {
             mmr.setDataSource(file.getAbsolutePath());
@@ -715,6 +885,70 @@ public class MainActivity extends AppCompatActivity
             return null;
         } finally {
             try { mmr.release(); } catch (Exception ignored) {}
+        }
+    }
+
+    private Track extractDsdMetadata(File file) {
+        try {
+            String lower = file.getName().toLowerCase(Locale.ROOT);
+            boolean isDsf = lower.endsWith(".dsf");
+
+            int sampleRate, channelCount;
+            long totalSamples;
+
+            RandomAccessFile raf = new RandomAccessFile(file, "r");
+            try {
+                if (isDsf) {
+                    DsfParser parser = new DsfParser();
+                    parser.parse(raf);
+                    sampleRate = parser.getSampleRate();
+                    channelCount = parser.getChannelCount();
+                    totalSamples = parser.getTotalSamples();
+                } else {
+                    DffParser parser = new DffParser();
+                    parser.parse(raf);
+                    sampleRate = parser.getSampleRate();
+                    channelCount = parser.getChannelCount();
+                    totalSamples = parser.getTotalSamples();
+                }
+            } finally {
+                raf.close();
+            }
+
+            long durationMs = sampleRate > 0 ? (totalSamples * 1000L) / sampleRate : 0;
+
+            String rawName = file.getName();
+            int dot = rawName.lastIndexOf('.');
+            String baseName = dot > 0 ? rawName.substring(0, dot) : rawName;
+
+            String title = baseName;
+            int trackNumber = 0;
+            java.util.regex.Matcher m = java.util.regex.Pattern
+                    .compile("^(\\d{1,3})[.\\-\\s]+(.+)$").matcher(baseName);
+            if (m.matches()) {
+                trackNumber = Integer.parseInt(m.group(1));
+                title = m.group(2).trim();
+            }
+
+            File parent = file.getParentFile();
+            String album = parent != null ? parent.getName() : "Unknown";
+            String artist = "Unknown";
+            String format = isDsf ? "DSF" : "DFF";
+
+            long id = (long) file.getAbsolutePath().hashCode();
+            long albumId = (long) (album + artist).hashCode();
+            Uri uri = Uri.fromFile(file);
+            String folderPath = parent != null ? parent.getAbsolutePath() : "";
+            String folderName = parent != null ? parent.getName() : "Unknown";
+
+            return new Track(id, title, artist, durationMs, uri,
+                    album, albumId, trackNumber, 1, 0,
+                    folderPath, folderName,
+                    null, null, null,
+                    0, sampleRate, 1, channelCount, format);
+        } catch (Exception e) {
+            Log.w(TAG, "Failed to read DSD: " + file.getAbsolutePath(), e);
+            return null;
         }
     }
 
@@ -885,7 +1119,7 @@ public class MainActivity extends AppCompatActivity
 
         if (info.isDsd) {
             info.dsdPcmRate = playbackController.getSampleRate();
-            info.dsdPlaybackMode = "Native";
+            info.dsdPlaybackMode = playbackController.isDopMode() ? "DoP" : "Native";
             int dr = info.dsdRate;
             if (dr == 2822400) info.sourceFormat = "DSD64";
             else if (dr == 5644800) info.sourceFormat = "DSD128";
@@ -906,6 +1140,8 @@ public class MainActivity extends AppCompatActivity
                 info.tidalFileSize = streamInfo.fileSize > 0
                         ? streamInfo.fileSize : streamInfo.estimatedDashSize;
             }
+        } else if (currentTrack != null && currentTrack.source == Track.Source.QOBUZ) {
+            info.sourceType = "QOBUZ";
         } else {
             info.sourceType = "LOCAL";
         }
@@ -993,6 +1229,15 @@ public class MainActivity extends AppCompatActivity
             }
         }
         return null;
+    }
+
+    private static String resolveArtworkKey(Track track) {
+        if (track.source == Track.Source.TIDAL && track.artworkUrl != null) {
+            return "tidal:" + track.artworkUrl;
+        } else if (track.source == Track.Source.QOBUZ && track.artworkUrl != null) {
+            return track.artworkUrl;
+        }
+        return "album:" + track.albumId;
     }
 
     private String formatTime(long ms) {

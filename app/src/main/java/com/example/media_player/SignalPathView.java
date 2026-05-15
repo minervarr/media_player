@@ -1,6 +1,6 @@
 package com.example.media_player;
 
-import com.matrixplayer.audioengine.SignalPathInfo;
+import com.nerio.audioengine.SignalPathInfo;
 
 import android.content.Context;
 import android.graphics.Canvas;
@@ -8,6 +8,7 @@ import android.graphics.Paint;
 import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.util.AttributeSet;
+import androidx.core.content.res.ResourcesCompat;
 import android.util.TypedValue;
 import android.view.View;
 
@@ -60,13 +61,14 @@ public class SignalPathView extends View {
         cornerRadius = 6 * dp;
         qualityBarWidth = 3 * dp;
         connectorWidth = 1.5f * dp;
-        nodePaddingH = 10 * dp;
-        nodePaddingV = 8 * dp;
+        nodePaddingH = 12 * dp;
+        nodePaddingV = 10 * dp;
         nodeMarginH = 12 * dp;
-        connectorGap = 4 * dp;
+        connectorGap = 6 * dp;
         lineSpacing = 2 * dp;
 
-        Typeface mono = Typeface.MONOSPACE;
+        Typeface cmuSerif = ResourcesCompat.getFont(context, R.font.cmu_serif);
+        if (cmuSerif == null) cmuSerif = Typeface.SERIF;
 
         nodeFillPaint.setColor(COLOR_NODE_FILL);
         nodeFillPaint.setStyle(Paint.Style.FILL);
@@ -81,19 +83,20 @@ public class SignalPathView extends View {
 
         qualityBarPaint.setStyle(Paint.Style.FILL);
 
-        labelPaint.setTypeface(mono);
+        labelPaint.setTypeface(cmuSerif);
         labelPaint.setTextSize(9 * sp);
+        labelPaint.setLetterSpacing(0.12f);
         labelPaint.setColor(COLOR_LABEL);
 
-        primaryPaint.setTypeface(mono);
-        primaryPaint.setTextSize(11 * sp);
+        primaryPaint.setTypeface(cmuSerif);
+        primaryPaint.setTextSize(12 * sp);
         primaryPaint.setColor(COLOR_TEXT_PRIMARY);
 
-        secondaryPaint.setTypeface(mono);
+        secondaryPaint.setTypeface(Typeface.create(cmuSerif, Typeface.ITALIC));
         secondaryPaint.setTextSize(10 * sp);
         secondaryPaint.setColor(COLOR_TEXT_SECONDARY);
 
-        badgePaint.setTypeface(Typeface.create(mono, Typeface.BOLD));
+        badgePaint.setTypeface(Typeface.create(cmuSerif, Typeface.BOLD));
         badgePaint.setTextSize(9 * sp);
         badgePaint.setColor(COLOR_GREEN_BRIGHT);
 
@@ -275,7 +278,10 @@ public class SignalPathView extends View {
 
         lines.add(info.codecName != null ? info.codecName : "unknown");
 
-        if (info.isDsd && "Native".equals(info.dsdPlaybackMode)) {
+        if (info.isDsd && "DoP".equals(info.dsdPlaybackMode)) {
+            lines.add("DSD DoP (bitstream over PCM)");
+            lines.add(dsdRateLabel(info.dsdRate) + "  " + info.sourceChannels + "ch");
+        } else if (info.isDsd && "Native".equals(info.dsdPlaybackMode)) {
             lines.add("DSD Native (raw bitstream)");
             lines.add(dsdRateLabel(info.dsdRate) + "  " + info.sourceChannels + "ch");
         } else {
@@ -307,8 +313,8 @@ public class SignalPathView extends View {
             StringBuilder sb = new StringBuilder();
             sb.append(info.outputDevice != null ? info.outputDevice : "Speaker");
             sb.append("  ");
-            if (info.isDsd && "Native".equals(info.dsdPlaybackMode)) {
-                sb.append(dsdRateLabel(info.dsdRate)).append(" Native");
+            if (info.isDsd && ("Native".equals(info.dsdPlaybackMode) || "DoP".equals(info.dsdPlaybackMode))) {
+                sb.append(dsdRateLabel(info.dsdRate)).append(" ").append(info.dsdPlaybackMode);
             } else {
                 sb.append(formatRate(info.outputRate)).append("/").append(info.outputBitDepth).append("bit");
             }
@@ -316,8 +322,8 @@ public class SignalPathView extends View {
         } else {
             // Verbose: multi-line
             lines.add(info.outputDevice != null ? info.outputDevice : "Speaker");
-            if (info.isDsd && "Native".equals(info.dsdPlaybackMode)) {
-                lines.add(dsdRateLabel(info.dsdRate) + " Native/" + info.outputChannels + "ch");
+            if (info.isDsd && ("Native".equals(info.dsdPlaybackMode) || "DoP".equals(info.dsdPlaybackMode))) {
+                lines.add(dsdRateLabel(info.dsdRate) + " " + info.dsdPlaybackMode + "/" + info.outputChannels + "ch");
             } else {
                 lines.add(formatRate(info.outputRate) + "/" + info.outputBitDepth + "bit/" + info.outputChannels + "ch");
             }

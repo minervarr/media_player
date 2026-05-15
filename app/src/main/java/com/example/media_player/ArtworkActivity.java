@@ -106,9 +106,7 @@ public class ArtworkActivity extends AppCompatActivity {
                     if (serviceTrack != null && !isSameTrack(serviceTrack, currentTrack)) {
                         currentTrack = serviceTrack;
                         // Update artwork
-                        String key = serviceTrack.artworkUrl != null
-                                ? "tidal:" + serviceTrack.artworkUrl
-                                : "album:" + serviceTrack.albumId;
+                        String key = artworkKeyFor(serviceTrack.artworkUrl, serviceTrack.albumId);
                         ArtworkCache.getInstance(ArtworkActivity.this)
                                 .loadFullSize(key, ivArtwork, screenSize);
                         loadLyricsForTrack(serviceTrack);
@@ -133,6 +131,20 @@ public class ArtworkActivity extends AppCompatActivity {
             serviceBound = false;
         }
     };
+
+    /**
+     * Build the ArtworkCache key for a track. Handles all three sources:
+     * - QOBUZ: track.artworkUrl is already prefixed with "qobuz:" by QobuzFragment.
+     * - TIDAL: track.artworkUrl is the bare artwork ID, needs "tidal:" prepended.
+     * - LOCAL or null artwork: fall back to "album:" + albumId.
+     */
+    private static String artworkKeyFor(String artworkUrl, long albumId) {
+        if (artworkUrl == null) return "album:" + albumId;
+        if (artworkUrl.startsWith("qobuz:") || artworkUrl.startsWith("tidal:")) {
+            return artworkUrl;
+        }
+        return "tidal:" + artworkUrl;
+    }
 
     public static Intent newIntent(Context context, long albumId) {
         Intent intent = new Intent(context, ArtworkActivity.class);
@@ -203,12 +215,9 @@ public class ArtworkActivity extends AppCompatActivity {
         screenSize = Math.max(
                 getResources().getDisplayMetrics().widthPixels,
                 getResources().getDisplayMetrics().heightPixels);
-        if (artworkUrl != null) {
+        if (artworkUrl != null || albumId != -1) {
             ArtworkCache.getInstance(this).loadFullSize(
-                    "tidal:" + artworkUrl, ivArtwork, screenSize);
-        } else if (albumId != -1) {
-            ArtworkCache.getInstance(this).loadFullSize(
-                    "album:" + albumId, ivArtwork, screenSize);
+                    artworkKeyFor(artworkUrl, albumId), ivArtwork, screenSize);
         }
 
         // Build initial track from intent extras
@@ -237,7 +246,7 @@ public class ArtworkActivity extends AppCompatActivity {
         ivArtwork.setOnTouchListener(tapListener);
 
         setAlbumChangedListener((newAlbumId, newArtworkUrl, track) -> {
-            String key = newArtworkUrl != null ? "tidal:" + newArtworkUrl : "album:" + newAlbumId;
+            String key = artworkKeyFor(newArtworkUrl, newAlbumId);
             ArtworkCache.getInstance(this).loadFullSize(key, ivArtwork, screenSize);
             if (track != null && !isSameTrack(track, currentTrack)) {
                 currentTrack = track;

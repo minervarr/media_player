@@ -18,21 +18,23 @@
     <EditText
         android:id="@+id/eq_search"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
+        android:layout_height="48dp"
         android:hint="@string/eq_search_hint"
         android:textColor="@color/text_primary"
         android:textColorHint="@color/text_secondary"
         android:background="@color/bg_surface"
-        android:padding="12dp"
-        android:textSize="14sp"
+        android:paddingStart="14dp"
+        android:paddingEnd="14dp"
+        android:textSize="15sp"
         android:inputType="text"
         android:imeOptions="actionSearch"
-        android:maxLines="1" />
+        android:maxLines="1"
+        android:gravity="center_vertical" />
 
     <View
         android:layout_width="match_parent"
         android:layout_height="1dp"
-        android:background="@color/bg_item" />
+        android:background="@color/divider" />
 
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/eq_recycler"

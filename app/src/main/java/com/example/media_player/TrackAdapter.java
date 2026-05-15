@@ -4,6 +4,7 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ImageView;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
@@ -53,6 +54,17 @@ public class TrackAdapter extends RecyclerView.Adapter<TrackAdapter.ViewHolder> 
         holder.itemView.setBackgroundColor(holder.itemView.getContext().getColor(
                 isPlaying ? R.color.bg_item_playing : R.color.bg_item));
 
+        // Playing indicator accent bar
+        if (holder.playingIndicator != null) {
+            holder.playingIndicator.setVisibility(isPlaying ? View.VISIBLE : View.GONE);
+            // Adjust artwork start margin when indicator is hidden
+            ViewGroup.MarginLayoutParams artworkParams =
+                    (ViewGroup.MarginLayoutParams) holder.ivArtwork.getLayoutParams();
+            if (!isPlaying) {
+                artworkParams.setMarginStart(0);
+            }
+        }
+
         int titleColor = holder.itemView.getContext().getColor(
                 isPlaying ? R.color.text_playing : R.color.text_primary);
 
@@ -70,6 +82,8 @@ public class TrackAdapter extends RecyclerView.Adapter<TrackAdapter.ViewHolder> 
         String artworkKey;
         if (track.source == Track.Source.TIDAL && track.artworkUrl != null) {
             artworkKey = "tidal:" + track.artworkUrl;
+        } else if (track.source == Track.Source.QOBUZ && track.artworkUrl != null) {
+            artworkKey = track.artworkUrl;
         } else {
             artworkKey = "album:" + track.albumId;
         }
@@ -90,6 +104,7 @@ public class TrackAdapter extends RecyclerView.Adapter<TrackAdapter.ViewHolder> 
     }
 
     static class ViewHolder extends RecyclerView.ViewHolder {
+        final View playingIndicator;
         final ImageView ivArtwork;
         final TextView tvTrackNumber;
         final TextView tvTitle;
@@ -98,6 +113,7 @@ public class TrackAdapter extends RecyclerView.Adapter<TrackAdapter.ViewHolder> 
 
         ViewHolder(View itemView) {
             super(itemView);
+            playingIndicator = itemView.findViewById(R.id.playing_indicator);
             ivArtwork = itemView.findViewById(R.id.iv_track_artwork);
             tvTrackNumber = itemView.findViewById(R.id.tv_track_number);
             tvTitle = itemView.findViewById(R.id.tv_title);

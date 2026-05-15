@@ -81,6 +81,19 @@ public class SettingsActivity extends AppCompatActivity {
                     .show();
         });
 
+        TextView tvQobuzQuality = findViewById(R.id.tv_qobuz_quality);
+        tvQobuzQuality.setText(settings.getQobuzAudioQuality());
+        tvQobuzQuality.setOnClickListener(v -> {
+            String[] options = {"SMART", "ULTRA_HI_RES", "HI_RES", "LOSSLESS", "MP3"};
+            new AlertDialog.Builder(this)
+                    .setTitle(R.string.setting_qobuz_quality)
+                    .setItems(options, (dialog, which) -> {
+                        settings.setQobuzAudioQuality(options[which]);
+                        tvQobuzQuality.setText(options[which]);
+                    })
+                    .show();
+        });
+
         // Headphone EQ
         eqProfileLauncher = registerForActivityResult(
                 new ActivityResultContracts.StartActivityForResult(), result -> {

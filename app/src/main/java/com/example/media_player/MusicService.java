@@ -1,11 +1,21 @@
 package com.example.media_player;
 
+import android.Manifest;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
+import android.annotation.SuppressLint;
 import android.app.Service;
+import android.bluetooth.BluetoothA2dp;
+import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.BluetoothDevice;
+import android.bluetooth.BluetoothProfile;
+import android.content.BroadcastReceiver;
+import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
+import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.hardware.usb.UsbDevice;
 import android.hardware.usb.UsbDeviceConnection;
@@ -14,28 +24,39 @@ import android.media.AudioDeviceInfo;
 import android.media.AudioFocusRequest;
 import android.media.AudioManager;
 import android.os.Binder;
+import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.os.SystemClock;
+import android.support.v4.media.MediaMetadataCompat;
+import android.support.v4.media.session.MediaSessionCompat;
+import android.support.v4.media.session.PlaybackStateCompat;
 import android.util.Log;
 import android.widget.Toast;
 
 import androidx.core.app.NotificationCompat;
 import androidx.core.content.ContextCompat;
+import androidx.media.session.MediaButtonReceiver;
 
-import com.matrixplayer.audioengine.AudioEngine;
-import com.matrixplayer.audioengine.AudioOutput;
-import com.matrixplayer.audioengine.AudioTrackOutput;
-import com.matrixplayer.audioengine.EqProcessor;
-import com.matrixplayer.audioengine.EqProfile;
-import com.matrixplayer.audioengine.UsbAudioOutput;
+import com.nerio.audioengine.AudioEngine;
+import com.nerio.audioengine.AudioOutput;
+import com.nerio.audioengine.AudioTrackOutput;
+import com.nerio.audioengine.EqProcessor;
+import com.nerio.audioengine.EqProfile;
+import com.nerio.audioengine.UsbAudioOutput;
 
+import com.example.media_player.qobuz.QobuzApi;
+import com.example.media_player.qobuz.QobuzAuth;
+import com.example.media_player.qobuz.QobuzModels;
 import com.example.media_player.tidal.DashFlacDataSource;
 import com.example.media_player.tidal.HttpMediaDataSource;
 import com.example.media_player.tidal.TidalApi;
 import com.example.media_player.tidal.TidalAuth;
 import com.example.media_player.tidal.TidalModels;
 
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -49,6 +70,13 @@ public class MusicService extends Service implements UsbAudioManager.UsbAudioLis
     private static final String TAG = "MusicService";
     private static final String CHANNEL_ID = "music_playback";
     private static final int NOTIFICATION_ID = 1;
+
+    private static final String ACTION_TOGGLE = "com.example.media_player.TOGGLE";
+    private static final String ACTION_NEXT = "com.example.media_player.NEXT";
+    private static final String ACTION_PREV = "com.example.media_player.PREV";
+    public static final String ACTION_RELOAD_EQ = "com.example.media_player.RELOAD_EQ";
+
+    private MediaSessionCompat mediaSession;
 
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final PlaybackController binder = new PlaybackController();
@@ -77,12 +105,50 @@ public class MusicService extends Service implements UsbAudioManager.UsbAudioLis
     private final ExecutorService tidalExecutor = Executors.newSingleThreadExecutor();
     private volatile TidalModels.StreamInfo lastTidalStreamInfo;
 
+    private QobuzAuth qobuzAuth;
+    private QobuzApi qobuzApi;
+    private final ExecutorService qobuzExecutor = Executors.newSingleThreadExecutor();
+
     private EqProcessor eqProcessor;
     private EqProfile currentEqProfile;
     private EqAssignmentDao eqAssignmentDao;
 
     private PlaybackCallback callback;
     private boolean foregroundStarted;
+    private boolean noisyReceiverRegistered;
+
+    private final BroadcastReceiver becomingNoisyReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            if (AudioManager.ACTION_AUDIO_BECOMING_NOISY.equals(intent.getAction())) {
+                if (audioEngine != null && audioEngine.isPlaying()) {
+                    mediaSession.getController().getTransportControls().pause();
+                }
+            }
+        }
+    };
+
+    // Bluetooth EQ auto-match
+    private String activeBtMac;
+    private String activeBtDeviceName;
+    private BluetoothEqMatcher.MatchResult pendingBtEqMatch;
+    private String pendingBtEqMac;
+    private boolean btReceiverRegistered;
+
+    private final BroadcastReceiver btConnectionReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            if (!BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED.equals(intent.getAction())) return;
+            int state = intent.getIntExtra(BluetoothProfile.EXTRA_STATE, -1);
+            BluetoothDevice device = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
+            if (device == null) return;
+            if (state == BluetoothProfile.STATE_CONNECTED) {
+                onBtDeviceConnected(device);
+            } else if (state == BluetoothProfile.STATE_DISCONNECTED) {
+                onBtDeviceDisconnected(device);
+            }
+        }
+    };
 
     // Database
     private StatsDao statsDao;
@@ -96,6 +162,8 @@ public class MusicService extends Service implements UsbAudioManager.UsbAudioLis
         void onOutputChanged();
         void onPrepared();
         void onError(String message);
+        void onBluetoothEqPrompt(String deviceName, String mac,
+                                  BluetoothEqMatcher.MatchResult matchResult);
     }
 
     public class PlaybackController extends Binder {
@@ -130,6 +198,7 @@ public class MusicService extends Service implements UsbAudioManager.UsbAudioLis
         public void seekTo(int positionMs) {
             if (audioEngine != null) {
                 audioEngine.seekTo(positionMs);
+                updatePlaybackState();
             }
         }
 
@@ -139,6 +208,36 @@ public class MusicService extends Service implements UsbAudioManager.UsbAudioLis
 
         public void setCallback(PlaybackCallback cb) {
             callback = cb;
+            // Deliver pending BT EQ match if the Activity just bound
+            if (cb != null && pendingBtEqMatch != null && pendingBtEqMac != null) {
+                BluetoothEqMatcher.MatchResult match = pendingBtEqMatch;
+                String mac = pendingBtEqMac;
+                String name = activeBtDeviceName;
+                pendingBtEqMatch = null;
+                pendingBtEqMac = null;
+                fireCallback(() -> cb.onBluetoothEqPrompt(name, mac, match));
+            }
+        }
+
+        public void applyBluetoothEqChoice(String mac, EqProfile profile) {
+            if (mac == null || profile == null) return;
+            eqAssignmentDao.setAssignment(EqAssignmentDao.TYPE_BLUETOOTH,
+                    EqAssignmentDao.bluetoothEntityId(mac),
+                    profile.name, profile.source, profile.form);
+            Log.d(TAG, "BT EQ saved: " + mac + " -> " + profile.name + " [" + profile.source + "]");
+            reloadEq();
+            Toast.makeText(MusicService.this,
+                    "EQ: " + profile.name + " (" + profile.source + ")",
+                    Toast.LENGTH_SHORT).show();
+        }
+
+        public void dismissBluetoothEqPrompt() {
+            pendingBtEqMatch = null;
+            pendingBtEqMac = null;
+        }
+
+        public String getActiveBtDeviceName() {
+            return activeBtDeviceName;
         }
 
         // Query
@@ -202,6 +301,10 @@ public class MusicService extends Service implements UsbAudioManager.UsbAudioLis
             return audioEngine != null ? audioEngine.getDsdRate() : 0;
         }
 
+        public boolean isDopMode() {
+            return audioEngine != null && audioEngine.isDopMode();
+        }
+
         public String getMime() {
             return audioEngine != null ? audioEngine.getMime() : null;
         }
@@ -232,6 +335,14 @@ public class MusicService extends Service implements UsbAudioManager.UsbAudioLis
 
         public TidalApi getTidalApi() {
             return tidalApi;
+        }
+
+        public QobuzAuth getQobuzAuth() {
+            return qobuzAuth;
+        }
+
+        public QobuzApi getQobuzApi() {
+            return qobuzApi;
         }
 
         public AppSettings getSettings() {
@@ -293,6 +404,8 @@ public class MusicService extends Service implements UsbAudioManager.UsbAudioLis
         audioManager = (AudioManager) getSystemService(AUDIO_SERVICE);
         tidalAuth = new TidalAuth(this);
         tidalApi = new TidalApi(tidalAuth);
+        qobuzAuth = new QobuzAuth(this);
+        qobuzApi = new QobuzApi(qobuzAuth);
 
         MatrixPlayerDatabase dbHelper = MatrixPlayerDatabase.getInstance(this);
         statsDao = new StatsDao(dbHelper);
@@ -302,11 +415,21 @@ public class MusicService extends Service implements UsbAudioManager.UsbAudioLis
         usbAudioManager = new UsbAudioManager(this);
         usbAudioManager.setListener(this);
         usbAudioManager.register();
+
+        initMediaSession();
+        registerBtConnectionReceiver();
     }
 
     @Override
     public void onDestroy() {
         Log.d(TAG, "onDestroy");
+        unregisterBtConnectionReceiver();
+        unregisterNoisyReceiver();
+        if (mediaSession != null) {
+            mediaSession.setActive(false);
+            mediaSession.release();
+            mediaSession = null;
+        }
         if (audioEngine != null) {
             audioEngine.release();
             audioEngine = null;
@@ -319,6 +442,7 @@ public class MusicService extends Service implements UsbAudioManager.UsbAudioLis
         cleanupExecutor.shutdownNow();
         usbExecutor.shutdownNow();
         tidalExecutor.shutdownNow();
+        qobuzExecutor.shutdownNow();
         abandonAudioFocus();
         super.onDestroy();
     }
@@ -347,6 +471,23 @@ public class MusicService extends Service implements UsbAudioManager.UsbAudioLis
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        if (intent != null) {
+            String action = intent.getAction();
+            if (ACTION_TOGGLE.equals(action)) {
+                togglePlayPause();
+                return START_NOT_STICKY;
+            } else if (ACTION_NEXT.equals(action)) {
+                playNext();
+                return START_NOT_STICKY;
+            } else if (ACTION_PREV.equals(action)) {
+                playPrevious();
+                return START_NOT_STICKY;
+            } else if (ACTION_RELOAD_EQ.equals(action)) {
+                reloadEq();
+                return START_NOT_STICKY;
+            }
+        }
+        MediaButtonReceiver.handleIntent(mediaSession, intent);
         // Service is started for foreground; if no playback, stop self
         if (audioEngine == null && !foregroundStarted) {
             stopSelf();
@@ -363,7 +504,7 @@ public class MusicService extends Service implements UsbAudioManager.UsbAudioLis
         playingTrackId = track.id;
 
         cleanupExecutor.execute(() -> {
-            releasePlayer();
+            releaseEngine();
             mainHandler.post(() -> startPlayback(track));
         });
     }
@@ -415,6 +556,8 @@ public class MusicService extends Service implements UsbAudioManager.UsbAudioLis
                             switchToUsbOutput(dac);
                         }
                     }
+                    updatePlaybackState();
+                    updateNotificationForCurrentTrack();
                     fireCallback(() -> { if (callback != null) callback.onPrepared(); });
                     queueNextTrack();
                 }));
@@ -441,12 +584,18 @@ public class MusicService extends Service implements UsbAudioManager.UsbAudioLis
 
         if (track.source == Track.Source.TIDAL) {
             playTidalTrack(track);
+        } else if (track.source == Track.Source.QOBUZ) {
+            playQobuzTrack(track);
         } else {
             audioEngine.play(this, track.uri);
         }
 
+        registerNoisyReceiver();
+
         // Start as a started service so it survives unbind
         ContextCompat.startForegroundService(this, new Intent(this, MusicService.class));
+        mediaSession.setActive(true);
+        updateMediaSessionMetadata(track);
         updateNotification(track);
 
         fireCallback(() -> {
@@ -535,17 +684,137 @@ public class MusicService extends Service implements UsbAudioManager.UsbAudioLis
         });
     }
 
+    private int resolveQobuzQuality() {
+        String setting = settings.getQobuzAudioQuality();
+        switch (setting) {
+            case "ULTRA_HI_RES": return QobuzModels.QUALITY_ULTRA_HI_RES;
+            case "HI_RES":       return QobuzModels.QUALITY_HI_RES;
+            case "LOSSLESS":     return QobuzModels.QUALITY_LOSSLESS;
+            case "MP3":          return QobuzModels.QUALITY_MP3;
+            case "SMART":
+            default:
+                // USB DAC -> Ultra Hi-Res, otherwise -> Lossless
+                if (usbOutputActive || usbAudioManager.getConnectedDac() != null) {
+                    Log.d(TAG, "Smart Qobuz quality: USB DAC -> ULTRA_HI_RES");
+                    return QobuzModels.QUALITY_ULTRA_HI_RES;
+                }
+                Log.d(TAG, "Smart Qobuz quality: speaker/wired -> LOSSLESS");
+                return QobuzModels.QUALITY_LOSSLESS;
+        }
+    }
+
+    /**
+     * Probe the Content-Length of a Qobuz CDN URL with a tiny Range request.
+     * Qobuz's track/getFileUrl response does not include the file size, but
+     * HttpMediaDataSource needs a known totalSize to drive readAt/fetchRange.
+     * Returns -1 on failure.
+     */
+    private long probeContentLength(String url) {
+        HttpURLConnection conn = null;
+        try {
+            conn = (HttpURLConnection) new URL(url).openConnection();
+            conn.setRequestMethod("GET");
+            conn.setRequestProperty("Range", "bytes=0-0");
+            conn.setConnectTimeout(15000);
+            conn.setReadTimeout(15000);
+            int code = conn.getResponseCode();
+            if (code == 206) {
+                // Content-Range: bytes 0-0/12345678
+                String cr = conn.getHeaderField("Content-Range");
+                if (cr != null) {
+                    int slash = cr.lastIndexOf('/');
+                    if (slash >= 0 && slash < cr.length() - 1) {
+                        try {
+                            return Long.parseLong(cr.substring(slash + 1).trim());
+                        } catch (NumberFormatException ignored) {}
+                    }
+                }
+            } else if (code == 200) {
+                // Server ignored Range; fall back to full Content-Length
+                long len = conn.getContentLengthLong();
+                if (len > 0) return len;
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "probeContentLength failed for Qobuz stream: " + e.getMessage());
+        } finally {
+            if (conn != null) conn.disconnect();
+        }
+        return -1;
+    }
+
+    private void playQobuzTrack(Track track) {
+        qobuzExecutor.execute(() -> {
+            try {
+                int quality = resolveQobuzQuality();
+                long qobuzId = Long.parseLong(track.qobuzTrackId);
+                QobuzModels.StreamUrl streamUrl = qobuzApi.getStreamUrlWithFallback(qobuzId, quality);
+
+                if (streamUrl.url == null || streamUrl.url.isEmpty()) {
+                    mainHandler.post(() -> {
+                        fireError("Could not get Qobuz stream");
+                        releasePlayer();
+                    });
+                    return;
+                }
+
+                if (streamUrl.formatId != quality) {
+                    mainHandler.post(() -> Toast.makeText(MusicService.this,
+                            "Qobuz: playing " + streamUrl.qualityLabel(),
+                            Toast.LENGTH_SHORT).show());
+                }
+
+                long durationHintUs = track.durationMs * 1000;
+                long contentLength = probeContentLength(streamUrl.url);
+                if (contentLength <= 0) {
+                    Log.e(TAG, "Could not probe Qobuz stream size for track " + qobuzId);
+                    mainHandler.post(() -> {
+                        fireError("Could not get Qobuz stream");
+                        releasePlayer();
+                    });
+                    return;
+                }
+                HttpMediaDataSource dataSource = new HttpMediaDataSource(
+                        streamUrl.url, contentLength, null);
+                if (audioEngine != null) {
+                    audioEngine.playStream(dataSource, durationHintUs);
+                }
+
+            } catch (Exception e) {
+                Log.e(TAG, "Failed to resolve Qobuz stream", e);
+                mainHandler.post(() -> {
+                    fireError("Could not get Qobuz stream");
+                    releasePlayer();
+                });
+            }
+        });
+    }
+
     private void togglePlayPause() {
         if (audioEngine == null) return;
         if (audioEngine.isPlaying()) {
-            Log.d(TAG, "pause");
-            audioEngine.pause();
+            handlePause();
         } else {
-            Log.d(TAG, "resume");
-            audioEngine.resume();
+            handleResume();
         }
-        boolean playing = audioEngine.isPlaying();
-        fireCallback(() -> { if (callback != null) callback.onPlayStateChanged(playing); });
+    }
+
+    private void handlePause() {
+        if (audioEngine != null && audioEngine.isPlaying()) {
+            audioEngine.pause();
+            updatePlaybackState();
+            updateNotificationForCurrentTrack();
+            fireCallback(() -> { if (callback != null) callback.onPlayStateChanged(false); });
+        }
+    }
+
+    private void handleResume() {
+        if (audioEngine != null && !audioEngine.isPlaying()) {
+            if (!requestAudioFocus()) return;
+            audioEngine.resume();
+            updatePlaybackState();
+            updateNotificationForCurrentTrack();
+            fireCallback(() -> { if (callback != null) callback.onPlayStateChanged(true); });
+        }
     }
 
     private void playNext() {
@@ -555,7 +824,7 @@ public class MusicService extends Service implements UsbAudioManager.UsbAudioLis
             Log.d(TAG, "playNext: advancing to queue index " + nextIndex);
             currentQueueIndex = nextIndex;
             playCurrentQueueTrack();
-        } else if (settings.isContinuousPlayback() && !isQueueTidal()) {
+        } else if (settings.isContinuousPlayback() && !isQueueOnline()) {
             Log.d(TAG, "playNext: end of queue, continuing to next album");
             continueToNextAlbum();
         } else {
@@ -565,9 +834,9 @@ public class MusicService extends Service implements UsbAudioManager.UsbAudioLis
         }
     }
 
-    private boolean isQueueTidal() {
+    private boolean isQueueOnline() {
         return !currentQueue.isEmpty()
-                && currentQueue.get(0).source == Track.Source.TIDAL;
+                && currentQueue.get(0).source != Track.Source.LOCAL;
     }
 
     private void continueToNextAlbum() {
@@ -642,6 +911,8 @@ public class MusicService extends Service implements UsbAudioManager.UsbAudioLis
 
             Log.d(TAG, "gapless transition: \"" + track.title + "\" ("
                     + (currentQueueIndex + 1) + "/" + currentQueue.size() + ")");
+            updateMediaSessionMetadata(track);
+            updatePlaybackState();
             updateNotification(track);
             fireCallback(() -> {
                 if (callback != null) callback.onTrackChanged(track, playingTrackId);
@@ -683,6 +954,30 @@ public class MusicService extends Service implements UsbAudioManager.UsbAudioLis
                     Log.e(TAG, "Failed to pre-queue next TIDAL track", e);
                 }
             });
+        } else if (next.source == Track.Source.QOBUZ) {
+            qobuzExecutor.execute(() -> {
+                try {
+                    int quality = resolveQobuzQuality();
+                    long qobuzId = Long.parseLong(next.qobuzTrackId);
+                    QobuzModels.StreamUrl streamUrl = qobuzApi.getStreamUrlWithFallback(qobuzId, quality);
+                    long durationHintUs = next.durationMs * 1000;
+
+                    if (streamUrl.url != null && !streamUrl.url.isEmpty()) {
+                        long contentLength = probeContentLength(streamUrl.url);
+                        if (contentLength <= 0) {
+                            Log.w(TAG, "Could not probe Qobuz stream size for next track " + qobuzId);
+                            return;
+                        }
+                        HttpMediaDataSource dataSource = new HttpMediaDataSource(
+                                streamUrl.url, contentLength, null);
+                        if (audioEngine != null) {
+                            audioEngine.queueNextStream(dataSource, durationHintUs);
+                        }
+                    }
+                } catch (Exception e) {
+                    Log.e(TAG, "Failed to pre-queue next Qobuz track", e);
+                }
+            });
         } else {
             audioEngine.queueNext(this, next.uri);
         }
@@ -719,6 +1014,8 @@ public class MusicService extends Service implements UsbAudioManager.UsbAudioLis
                             if (pausedByFocusLoss && audioEngine != null) {
                                 audioEngine.resume();
                                 pausedByFocusLoss = false;
+                                updatePlaybackState();
+                                updateNotificationForCurrentTrack();
                                 fireCallback(() -> {
                                     if (callback != null) callback.onPlayStateChanged(true);
                                 });
@@ -729,6 +1026,8 @@ public class MusicService extends Service implements UsbAudioManager.UsbAudioLis
                             pausedByFocusLoss = false;
                             if (audioEngine != null && audioEngine.isPlaying()) {
                                 audioEngine.pause();
+                                updatePlaybackState();
+                                updateNotificationForCurrentTrack();
                                 fireCallback(() -> {
                                     if (callback != null) callback.onPlayStateChanged(false);
                                 });
@@ -740,6 +1039,8 @@ public class MusicService extends Service implements UsbAudioManager.UsbAudioLis
                             if (audioEngine != null && audioEngine.isPlaying()) {
                                 audioEngine.pause();
                                 pausedByFocusLoss = true;
+                                updatePlaybackState();
+                                updateNotificationForCurrentTrack();
                                 fireCallback(() -> {
                                     if (callback != null) callback.onPlayStateChanged(false);
                                 });
@@ -812,6 +1113,22 @@ public class MusicService extends Service implements UsbAudioManager.UsbAudioLis
             }
         }
 
+        // Bluetooth device profile
+        if (activeBtMac != null && eqAssignmentDao != null) {
+            EqAssignmentDao.Assignment btA = eqAssignmentDao.getAssignment(
+                    EqAssignmentDao.TYPE_BLUETOOTH,
+                    EqAssignmentDao.bluetoothEntityId(activeBtMac));
+            if (btA != null) {
+                EqProfile bp = EqProfile.find(this, btA.profileName,
+                        btA.profileSource, btA.profileForm);
+                if (bp != null) {
+                    Log.d(TAG, "EQ resolved for BT device: " + activeBtDeviceName
+                            + " -> " + btA.profileName);
+                    return bp;
+                }
+            }
+        }
+
         // Fall back to global default
         String profileName = settings.getEqProfileName();
         if (profileName == null || profileName.isEmpty()) return null;
@@ -871,7 +1188,8 @@ public class MusicService extends Service implements UsbAudioManager.UsbAudioLis
         }
     }
 
-    private void releasePlayer() {
+    /** Stop engine and EQ only -- keeps foreground + session active for track switches. */
+    private void releaseEngine() {
         finalizePlayStats();
         if (audioEngine != null) {
             audioEngine.stop();
@@ -883,11 +1201,23 @@ public class MusicService extends Service implements UsbAudioManager.UsbAudioLis
         }
         usbOutputActive = false;
         lastTidalStreamInfo = null;
+        unregisterNoisyReceiver();
+    }
+
+    /** Full teardown: engine + audio focus + session + foreground notification. */
+    private void releasePlayer() {
+        releaseEngine();
         abandonAudioFocus();
-        if (foregroundStarted) {
-            stopForeground(STOP_FOREGROUND_REMOVE);
-            foregroundStarted = false;
-        }
+        mainHandler.post(() -> {
+            if (mediaSession != null) {
+                mediaSession.setActive(false);
+                updatePlaybackState();
+            }
+            if (foregroundStarted) {
+                stopForeground(STOP_FOREGROUND_REMOVE);
+                foregroundStarted = false;
+            }
+        });
     }
 
     // -- USB audio --
@@ -1041,15 +1371,113 @@ public class MusicService extends Service implements UsbAudioManager.UsbAudioLis
         });
     }
 
+    // -- Media session --
+
+    private void initMediaSession() {
+        mediaSession = new MediaSessionCompat(this, TAG);
+        mediaSession.setCallback(new MediaSessionCompat.Callback() {
+            @Override
+            public void onPlay() {
+                handleResume();
+            }
+
+            @Override
+            public void onPause() {
+                handlePause();
+            }
+
+            @Override
+            public void onSkipToNext() {
+                playNext();
+            }
+
+            @Override
+            public void onSkipToPrevious() {
+                playPrevious();
+            }
+
+            @Override
+            public void onSeekTo(long pos) {
+                if (audioEngine != null) {
+                    audioEngine.seekTo((int) pos);
+                    updatePlaybackState();
+                }
+            }
+
+            @Override
+            public void onStop() {
+                releasePlayer();
+                fireCallback(() -> { if (callback != null) callback.onPlayStateChanged(false); });
+            }
+        });
+        mediaSession.setFlags(MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS
+                | MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS);
+    }
+
+    private static String resolveArtworkKey(Track track) {
+        if (track.source == Track.Source.TIDAL && track.artworkUrl != null) {
+            return "tidal:" + track.artworkUrl;
+        } else if (track.source == Track.Source.QOBUZ && track.artworkUrl != null) {
+            return track.artworkUrl; // Already prefixed with "qobuz:" by QobuzFragment
+        }
+        return "album:" + track.albumId;
+    }
+
+    private void updateMediaSessionMetadata(Track track) {
+        if (mediaSession == null) return;
+
+        String artworkKey = resolveArtworkKey(track);
+        Bitmap artwork = ArtworkCache.getInstance(this).getCachedBitmap(artworkKey);
+
+        MediaMetadataCompat.Builder meta = new MediaMetadataCompat.Builder()
+                .putString(MediaMetadataCompat.METADATA_KEY_TITLE, track.title)
+                .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, track.artist)
+                .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, track.album)
+                .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, track.durationMs);
+
+        if (artwork != null) {
+            meta.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, artwork);
+        }
+
+        mediaSession.setMetadata(meta.build());
+    }
+
+    private void updatePlaybackState() {
+        if (mediaSession == null) return;
+
+        boolean playing = audioEngine != null && audioEngine.isPlaying();
+        long position = audioEngine != null ? audioEngine.getCurrentPosition() : 0;
+
+        int state = playing ? PlaybackStateCompat.STATE_PLAYING
+                : (audioEngine != null ? PlaybackStateCompat.STATE_PAUSED
+                : PlaybackStateCompat.STATE_STOPPED);
+
+        long actions = PlaybackStateCompat.ACTION_PLAY
+                | PlaybackStateCompat.ACTION_PAUSE
+                | PlaybackStateCompat.ACTION_PLAY_PAUSE
+                | PlaybackStateCompat.ACTION_SKIP_TO_NEXT
+                | PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS
+                | PlaybackStateCompat.ACTION_SEEK_TO
+                | PlaybackStateCompat.ACTION_STOP;
+
+        PlaybackStateCompat playbackState = new PlaybackStateCompat.Builder()
+                .setActions(actions)
+                .setState(state, position, playing ? 1.0f : 0f, SystemClock.elapsedRealtime())
+                .build();
+
+        mediaSession.setPlaybackState(playbackState);
+    }
+
     // -- Notification --
 
-    private void updateNotification(Track track) {
-        String artworkKey;
-        if (track.source == Track.Source.TIDAL && track.artworkUrl != null) {
-            artworkKey = "tidal:" + track.artworkUrl;
-        } else {
-            artworkKey = "album:" + track.albumId;
+    private void updateNotificationForCurrentTrack() {
+        if (currentQueueIndex >= 0 && currentQueueIndex < currentQueue.size()) {
+            updateNotification(currentQueue.get(currentQueueIndex));
         }
+    }
+
+    private void updateNotification(Track track) {
+        String artworkKey = resolveArtworkKey(track);
         Bitmap artwork = ArtworkCache.getInstance(this).getCachedBitmap(artworkKey);
 
         Notification notification = buildNotification(track.title, track.artist, artwork);
@@ -1065,10 +1493,17 @@ public class MusicService extends Service implements UsbAudioManager.UsbAudioLis
     }
 
     private Notification buildNotification(String title, String artist, Bitmap artwork) {
+        boolean playing = audioEngine != null && audioEngine.isPlaying();
+
         Intent openIntent = new Intent(this, MainActivity.class);
         openIntent.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
         PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, openIntent,
                 PendingIntent.FLAG_IMMUTABLE);
+
+        androidx.media.app.NotificationCompat.MediaStyle mediaStyle =
+                new androidx.media.app.NotificationCompat.MediaStyle()
+                        .setMediaSession(mediaSession.getSessionToken())
+                        .setShowActionsInCompactView(0, 1, 2);
 
         NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle(title)
@@ -1076,7 +1511,23 @@ public class MusicService extends Service implements UsbAudioManager.UsbAudioLis
                 .setSmallIcon(android.R.drawable.ic_media_play)
                 .setContentIntent(pendingIntent)
                 .setOngoing(true)
-                .setSilent(true);
+                .setSilent(true)
+                .setStyle(mediaStyle)
+                .addAction(android.R.drawable.ic_media_previous, "Previous",
+                        PendingIntent.getService(this, 0,
+                                new Intent(this, MusicService.class).setAction(ACTION_PREV),
+                                PendingIntent.FLAG_IMMUTABLE))
+                .addAction(playing
+                                ? android.R.drawable.ic_media_pause
+                                : android.R.drawable.ic_media_play,
+                        playing ? "Pause" : "Play",
+                        PendingIntent.getService(this, 1,
+                                new Intent(this, MusicService.class).setAction(ACTION_TOGGLE),
+                                PendingIntent.FLAG_IMMUTABLE))
+                .addAction(android.R.drawable.ic_media_next, "Next",
+                        PendingIntent.getService(this, 2,
+                                new Intent(this, MusicService.class).setAction(ACTION_NEXT),
+                                PendingIntent.FLAG_IMMUTABLE));
 
         if (artwork != null) {
             builder.setLargeIcon(artwork);
@@ -1095,7 +1546,155 @@ public class MusicService extends Service implements UsbAudioManager.UsbAudioLis
         }
     }
 
+    // -- Audio becoming noisy (headphone/BT disconnect) --
+
+    private void registerNoisyReceiver() {
+        if (!noisyReceiverRegistered) {
+            IntentFilter filter = new IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY);
+            registerReceiver(becomingNoisyReceiver, filter);
+            noisyReceiverRegistered = true;
+        }
+    }
+
+    private void unregisterNoisyReceiver() {
+        if (noisyReceiverRegistered) {
+            unregisterReceiver(becomingNoisyReceiver);
+            noisyReceiverRegistered = false;
+        }
+    }
+
     // -- Helpers --
+
+    // -- Bluetooth EQ auto-match --
+
+    private boolean hasBtConnectPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            return checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT)
+                    == PackageManager.PERMISSION_GRANTED;
+        }
+        return true;
+    }
+
+    @SuppressLint("MissingPermission")
+    private void registerBtConnectionReceiver() {
+        if (!hasBtConnectPermission()) return;
+        if (!btReceiverRegistered) {
+            IntentFilter filter = new IntentFilter(BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED);
+            registerReceiver(btConnectionReceiver, filter);
+            btReceiverRegistered = true;
+        }
+
+        // Scan for already-connected A2DP devices (handles app start after BT connect)
+        BluetoothAdapter btAdapter = BluetoothAdapter.getDefaultAdapter();
+        if (btAdapter != null) {
+            btAdapter.getProfileProxy(this, new BluetoothProfile.ServiceListener() {
+                @Override
+                public void onServiceConnected(int profile, BluetoothProfile proxy) {
+                    if (profile == BluetoothProfile.A2DP) {
+                        List<BluetoothDevice> connected =
+                                ((BluetoothA2dp) proxy).getConnectedDevices();
+                        if (connected != null && !connected.isEmpty()
+                                && activeBtMac == null) {
+                            BluetoothDevice device = connected.get(0);
+                            Log.d(TAG, "BT A2DP already connected at startup: "
+                                    + device.getName() + " [" + device.getAddress() + "]");
+                            onBtDeviceConnected(device);
+                        }
+                        btAdapter.closeProfileProxy(BluetoothProfile.A2DP, proxy);
+                    }
+                }
+
+                @Override
+                public void onServiceDisconnected(int profile) {}
+            }, BluetoothProfile.A2DP);
+        }
+    }
+
+    private void unregisterBtConnectionReceiver() {
+        if (btReceiverRegistered) {
+            unregisterReceiver(btConnectionReceiver);
+            btReceiverRegistered = false;
+        }
+    }
+
+    private void onBtDeviceConnected(BluetoothDevice device) {
+        String mac = device.getAddress();
+        String name = device.getName();
+        Log.d(TAG, "BT A2DP connected: " + name + " [" + mac + "]");
+        activeBtMac = mac;
+        activeBtDeviceName = name != null ? name : mac;
+
+        if (!settings.isEqEnabled()) return;
+
+        // Check for saved BT EQ assignment
+        EqAssignmentDao.Assignment saved = eqAssignmentDao.getAssignment(
+                EqAssignmentDao.TYPE_BLUETOOTH,
+                EqAssignmentDao.bluetoothEntityId(mac));
+        if (saved != null) {
+            EqProfile p = EqProfile.find(this, saved.profileName,
+                    saved.profileSource, saved.profileForm);
+            if (p != null) {
+                Log.d(TAG, "BT EQ recalled: " + saved.profileName);
+                reloadEq();
+                mainHandler.post(() -> Toast.makeText(this,
+                        "EQ: " + saved.profileName,
+                        Toast.LENGTH_SHORT).show());
+                return;
+            }
+        }
+
+        // Run matcher on background thread (loadAll may decompress on first call)
+        cleanupExecutor.execute(() -> {
+            List<EqProfile> profiles = EqProfile.loadAll(this);
+            BluetoothEqMatcher.MatchResult result =
+                    BluetoothEqMatcher.match(activeBtDeviceName, profiles);
+            if (result == null) {
+                Log.d(TAG, "BT EQ: no match for " + activeBtDeviceName);
+                return;
+            }
+
+            Log.d(TAG, "BT EQ match: tier=" + result.matchTier
+                    + " base=" + result.matchedBaseName
+                    + " candidates=" + result.allCandidates.size()
+                    + " autoApply=" + result.autoApply);
+
+            if (result.autoApply) {
+                EqProfile pick = BluetoothEqMatcher.pickAutoApplyProfile(result);
+                if (pick != null) {
+                    eqAssignmentDao.setAssignment(EqAssignmentDao.TYPE_BLUETOOTH,
+                            EqAssignmentDao.bluetoothEntityId(mac),
+                            pick.name, pick.source, pick.form);
+                    mainHandler.post(() -> {
+                        reloadEq();
+                        Toast.makeText(this,
+                                "EQ: " + pick.name + " (" + pick.source + ")",
+                                Toast.LENGTH_SHORT).show();
+                    });
+                }
+            } else {
+                // Need user input — show dialog
+                mainHandler.post(() -> {
+                    if (callback != null) {
+                        callback.onBluetoothEqPrompt(activeBtDeviceName, mac, result);
+                    } else {
+                        // Activity not bound — store for later delivery
+                        pendingBtEqMatch = result;
+                        pendingBtEqMac = mac;
+                    }
+                });
+            }
+        });
+    }
+
+    private void onBtDeviceDisconnected(BluetoothDevice device) {
+        String mac = device.getAddress();
+        if (mac.equals(activeBtMac)) {
+            Log.d(TAG, "BT A2DP disconnected: " + activeBtDeviceName);
+            activeBtMac = null;
+            activeBtDeviceName = null;
+            reloadEq();
+        }
+    }
 
     private void fireCallback(Runnable action) {
         if (Looper.myLooper() == Looper.getMainLooper()) {

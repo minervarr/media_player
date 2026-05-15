@@ -6,6 +6,7 @@ import android.database.sqlite.SQLiteDatabase;
 import android.net.Uri;
 import android.util.Log;
 
+import android.database.sqlite.SQLiteException;
 import android.database.sqlite.SQLiteStatement;
 
 import java.util.ArrayList;
@@ -153,10 +154,20 @@ public class TrackDao {
             }
             stmt.close();
 
-            int removed = db.delete("tracks",
-                    "source = 0 AND file_path IS NOT NULL"
-                    + " AND file_path NOT IN (SELECT path FROM temp_scanned)",
-                    null);
+            String whereClause = "source = 0 AND file_path IS NOT NULL"
+                    + " AND file_path NOT IN (SELECT path FROM temp_scanned)";
+            int removed;
+            try {
+                removed = db.delete("tracks", whereClause, null);
+            } catch (SQLiteException e) {
+                Log.w(TAG, "removeStaleLocalTracks: trigger error, rebuilding FTS index", e);
+                if (MatrixPlayerDatabase.isFtsAvailable()) {
+                    try {
+                        db.execSQL("INSERT INTO search_index(search_index) VALUES('rebuild')");
+                    } catch (Exception ignored) {}
+                }
+                removed = db.delete("tracks", whereClause, null);
+            }
 
             db.execSQL("DROP TABLE IF EXISTS temp_scanned");
             db.setTransactionSuccessful();
@@ -261,11 +272,19 @@ public class TrackDao {
         String format = c.getString(c.getColumnIndexOrThrow("format"));
 
         Uri uri = uriStr != null ? Uri.parse(uriStr) : null;
-        Track.Source source = sourceInt == 1 ? Track.Source.TIDAL : Track.Source.LOCAL;
+        Track.Source source;
+        switch (sourceInt) {
+            case 1: source = Track.Source.TIDAL; break;
+            case 2: source = Track.Source.QOBUZ; break;
+            default: source = Track.Source.LOCAL; break;
+        }
+        String qobuzTrackId = null;
+        int qobuzCol = c.getColumnIndex("qobuz_track_id");
+        if (qobuzCol >= 0) qobuzTrackId = c.getString(qobuzCol);
 
         return new Track(id, title, artist, durationMs, uri,
                 album, albumId, trackNumber, discNumber, year,
-                folderPath, folderName, source, tidalTrackId, artworkUrl,
+                folderPath, folderName, source, tidalTrackId, qobuzTrackId, artworkUrl,
                 albumArtist, genre, composer, bitrate, sampleRate, bitDepth, channels, format);
     }
 
@@ -283,7 +302,13 @@ public class TrackDao {
         cv.put("uri", track.uri != null ? track.uri.toString() : null);
         cv.put("folder_path", track.folderPath);
         cv.put("folder_name", track.folderName);
-        cv.put("source", track.source == Track.Source.TIDAL ? 1 : 0);
+        int sourceInt;
+        switch (track.source) {
+            case TIDAL: sourceInt = 1; break;
+            case QOBUZ: sourceInt = 2; break;
+            default:    sourceInt = 0; break;
+        }
+        cv.put("source", sourceInt);
         cv.put("tidal_track_id", track.tidalTrackId);
         cv.put("artwork_url", track.artworkUrl);
         cv.put("album_artist", track.albumArtist);

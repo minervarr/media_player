@@ -1,0 +1,3 @@
+[submodule "audioengine"]
+	path = audioengine
+	url = /home/nerio/Files/nerio_handmade/android/audio-engine

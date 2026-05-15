@@ -16,6 +16,7 @@ public class AppSettings {
     private static final String KEY_USB_EXCLUSIVE_MODE = "usb_exclusive_mode";
     private static final String KEY_MUSIC_FOLDERS = "music_folders";
     private static final String KEY_TIDAL_AUDIO_QUALITY = "tidal_audio_quality";
+    private static final String KEY_QOBUZ_AUDIO_QUALITY = "qobuz_audio_quality";
     private static final String KEY_SIGNAL_PATH_MODE = "signal_path_mode";
     private static final String KEY_LYRICS_ENABLED = "lyrics_enabled";
     private static final String KEY_EQ_ENABLED = "eq_enabled";
@@ -72,6 +73,15 @@ public class AppSettings {
     public void setTidalAudioQuality(String quality) {
         Log.d(TAG, "setTidalAudioQuality: " + quality);
         prefs.edit().putString(KEY_TIDAL_AUDIO_QUALITY, quality).apply();
+    }
+
+    public String getQobuzAudioQuality() {
+        return prefs.getString(KEY_QOBUZ_AUDIO_QUALITY, "SMART");
+    }
+
+    public void setQobuzAudioQuality(String quality) {
+        Log.d(TAG, "setQobuzAudioQuality: " + quality);
+        prefs.edit().putString(KEY_QOBUZ_AUDIO_QUALITY, quality).apply();
     }
 
     public int getSignalPathMode() {

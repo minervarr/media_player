@@ -1,28 +1,37 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/item_root"
     android:layout_width="match_parent"
-    android:layout_height="56dp"
+    android:layout_height="64dp"
     android:orientation="horizontal"
     android:gravity="center_vertical"
-    android:paddingStart="8dp"
-    android:paddingEnd="12dp"
+    android:paddingStart="12dp"
+    android:paddingEnd="14dp"
     android:background="@color/bg_item">
 
-    <ImageView
+    <View
+        android:id="@+id/playing_indicator"
+        android:layout_width="3.5dp"
+        android:layout_height="36dp"
+        android:layout_marginEnd="9dp"
+        android:background="@color/green_bright"
+        android:visibility="gone" />
+
+    <com.google.android.material.imageview.ShapeableImageView
         android:id="@+id/iv_track_artwork"
-        android:layout_width="40dp"
-        android:layout_height="40dp"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
         android:scaleType="centerCrop"
-        android:background="@color/bg_surface" />
+        android:background="@drawable/bg_artwork_rounded_sm"
+        app:shapeAppearanceOverlay="@style/RoundedCorner4" />
 
     <TextView
         android:id="@+id/tv_track_number"
-        android:layout_width="32dp"
+        android:layout_width="28dp"
         android:layout_height="wrap_content"
         android:textColor="@color/text_secondary"
         android:textSize="12sp"
-        android:fontFamily="monospace"
         android:gravity="center"
         android:maxLines="1" />
 
@@ -49,8 +58,11 @@
             android:layout_height="wrap_content"
             android:textColor="@color/text_secondary"
             android:textSize="12sp"
+            android:textStyle="italic"
+            android:letterSpacing="0.02"
             android:maxLines="1"
-            android:ellipsize="end" />
+            android:ellipsize="end"
+            android:layout_marginTop="1dp" />
 
     </LinearLayout>
 
@@ -59,7 +71,6 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:textColor="@color/text_secondary"
-        android:textSize="12sp"
-        android:fontFamily="monospace" />
+        android:textSize="12sp" />
 
 </LinearLayout>

@@ -61,7 +61,7 @@
                     android:text="@string/bt_codec_adb_command"
                     android:textColor="@color/green_bright"
                     android:textSize="11sp"
-                    android:fontFamily="monospace"
+                    android:letterSpacing="0.03"
                     android:background="@color/bg_primary"
                     android:padding="8dp"
                     android:layout_marginTop="6dp" />
@@ -120,6 +120,15 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:textColor="@color/green_bright"
+                    android:textSize="12sp"
+                    android:layout_marginTop="2dp"
+                    android:visibility="gone" />
+
+                <TextView
+                    android:id="@+id/tv_active_device_eq"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textColor="@color/text_secondary"
                     android:textSize="12sp"
                     android:layout_marginTop="2dp"
                     android:visibility="gone" />

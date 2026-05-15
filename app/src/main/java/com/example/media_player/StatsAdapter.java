@@ -140,6 +140,8 @@ public class StatsAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> 
             String artworkKey;
             if (track.source == Track.Source.TIDAL && track.artworkUrl != null) {
                 artworkKey = "tidal:" + track.artworkUrl;
+            } else if (track.source == Track.Source.QOBUZ && track.artworkUrl != null) {
+                artworkKey = track.artworkUrl;
             } else {
                 artworkKey = "album:" + track.albumId;
             }

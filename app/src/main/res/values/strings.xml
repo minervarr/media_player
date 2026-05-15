@@ -65,6 +65,14 @@
     <string name="bt_codec_association_failed">Association failed: %s</string>
     <string name="bt_codec_saved_profile">Saved: %s</string>
 
+    <string name="bt_eq_label">EQ: %s</string>
+    <string name="bt_eq_none">None</string>
+    <string name="bt_eq_choose">Choose EQ</string>
+    <string name="bt_eq_remove">Remove EQ</string>
+    <string name="bt_eq_section">Headphone EQ</string>
+    <string name="bt_eq_saved">EQ profile saved for device</string>
+    <string name="bt_eq_removed">EQ profile removed from device</string>
+
     <string name="setting_music_folders">Music folders</string>
     <string name="setting_music_folders_empty">No folders configured</string>
     <string name="setting_add_folder">Add folder</string>
@@ -91,6 +99,28 @@
     <string name="tidal_stream_error">Could not play TIDAL stream</string>
     <string name="setting_tidal_quality">TIDAL audio quality</string>
     <string name="setting_tidal_quality_desc">SMART auto-selects based on output (USB DAC: hi-res lossless, LDAC: lossless, AAC/SBC: high). Manual: HI_RES_LOSSLESS | LOSSLESS | HIGH | LOW</string>
+    <string name="setting_qobuz_quality">Qobuz audio quality</string>
+    <string name="setting_qobuz_quality_desc">SMART auto-selects (USB DAC: ultra hi-res, otherwise: lossless). Manual: ULTRA_HI_RES | HI_RES | LOSSLESS | MP3</string>
+
+    <!-- Qobuz -->
+    <string name="tab_qobuz">Qobuz</string>
+    <string name="qobuz_login_title">Qobuz</string>
+    <string name="qobuz_login_instructions">Sign in with your Qobuz account in the secure web window</string>
+    <string name="qobuz_login">Sign in with Qobuz</string>
+    <string name="qobuz_connecting">Connecting...</string>
+    <string name="qobuz_login_failed">Login failed -- try again</string>
+    <string name="qobuz_session_expired">Session expired -- sign in again</string>
+    <string name="qobuz_login_cancelled">Login cancelled</string>
+    <string name="qobuz_albums">Albums</string>
+    <string name="qobuz_playlists">Playlists</string>
+    <string name="qobuz_favorites">Favorite Tracks</string>
+    <string name="qobuz_search">Search</string>
+    <string name="qobuz_search_hint">Search albums...</string>
+    <string name="qobuz_cancel">\u00D7</string>
+    <string name="qobuz_logout">Logout</string>
+    <string name="qobuz_loading">Loading...</string>
+    <string name="qobuz_error">Request failed</string>
+    <string name="qobuz_stream_error">Could not play Qobuz stream</string>
 
     <string name="lyrics_no_lyrics">No lyrics available</string>
 

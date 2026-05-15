@@ -83,7 +83,7 @@ public class SyncedLyricsView extends View {
             Typeface serifFont = ResourcesCompat.getFont(context, R.font.cmu_serif);
             boldSerif = Typeface.create(serifFont, Typeface.BOLD);
         } catch (Exception e) {
-            boldSerif = Typeface.create("serif", Typeface.BOLD);
+            boldSerif = Typeface.create(Typeface.SERIF, Typeface.BOLD);
         }
         activePaint.setTypeface(boldSerif);
         inactivePaint.setTypeface(boldSerif);

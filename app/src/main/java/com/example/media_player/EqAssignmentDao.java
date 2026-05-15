@@ -12,10 +12,11 @@ public class EqAssignmentDao {
 
     private static final String TAG = "EqAssignmentDao";
 
-    public static final int TYPE_TRACK  = 0;
-    public static final int TYPE_ALBUM  = 1;
-    public static final int TYPE_ARTIST = 2;
-    public static final int TYPE_FOLDER = 3;
+    public static final int TYPE_TRACK     = 0;
+    public static final int TYPE_ALBUM     = 1;
+    public static final int TYPE_ARTIST    = 2;
+    public static final int TYPE_FOLDER    = 3;
+    public static final int TYPE_BLUETOOTH = 4;
 
     private final MatrixPlayerDatabase dbHelper;
 
@@ -147,5 +148,10 @@ public class EqAssignmentDao {
     /** Hash helper for callers setting folder-level assignments. */
     public static long folderEntityId(String folderPath) {
         return folderPath != null ? (long) folderPath.hashCode() : 0;
+    }
+
+    /** Hash helper for Bluetooth device MAC addresses. */
+    public static long bluetoothEntityId(String macAddress) {
+        return macAddress != null ? (long) macAddress.toUpperCase().hashCode() : 0;
     }
 }

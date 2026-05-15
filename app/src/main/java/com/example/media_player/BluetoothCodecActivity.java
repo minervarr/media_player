@@ -33,7 +33,9 @@ import androidx.appcompat.widget.Toolbar;
 import androidx.core.content.ContextCompat;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 public class BluetoothCodecActivity extends AppCompatActivity
@@ -42,11 +44,13 @@ public class BluetoothCodecActivity extends AppCompatActivity
     private BluetoothCodecSettings codecSettings;
     private BluetoothCodecManager codecManager;
     private BluetoothAdapter bluetoothAdapter;
+    private EqAssignmentDao eqAssignmentDao;
     private LinearLayout pairedDevicesList;
     private LinearLayout permissionBanner;
     private TextView tvActiveDeviceName;
     private TextView tvActiveDeviceCodec;
     private TextView tvActiveDeviceSaved;
+    private TextView tvActiveDeviceEq;
 
     private boolean permissionGranted;
     private boolean proxyReady;
@@ -54,6 +58,11 @@ public class BluetoothCodecActivity extends AppCompatActivity
 
     // Pending CDM association callback (for pre-API 33 flow)
     private BluetoothCodecManager.AssociationCallback pendingCdmCallback;
+
+    // EQ pick mode state
+    private ActivityResultLauncher<Intent> eqPickLauncher;
+    private String pendingEqDeviceMac;
+    private AlertDialog currentConfigDialog;
 
     private final ActivityResultLauncher<String> permissionLauncher =
             registerForActivityResult(new ActivityResultContracts.RequestPermission(), granted -> {
@@ -82,6 +91,7 @@ public class BluetoothCodecActivity extends AppCompatActivity
 
         MatrixPlayerDatabase db = MatrixPlayerDatabase.getInstance(this);
         codecSettings = new BluetoothCodecSettings(db, this);
+        eqAssignmentDao = new EqAssignmentDao(db);
         codecManager = new BluetoothCodecManager(this);
         codecManager.setListener(this);
         codecManager.setOnProxyReady(() -> {
@@ -96,6 +106,34 @@ public class BluetoothCodecActivity extends AppCompatActivity
         tvActiveDeviceName = findViewById(R.id.tv_active_device_name);
         tvActiveDeviceCodec = findViewById(R.id.tv_active_device_codec);
         tvActiveDeviceSaved = findViewById(R.id.tv_active_device_saved);
+        tvActiveDeviceEq = findViewById(R.id.tv_active_device_eq);
+
+        eqPickLauncher = registerForActivityResult(
+                new ActivityResultContracts.StartActivityForResult(), result -> {
+                    if (result.getResultCode() == RESULT_OK && result.getData() != null) {
+                        Intent data = result.getData();
+                        String name = data.getStringExtra(EqProfileActivity.RESULT_PROFILE_NAME);
+                        String source = data.getStringExtra(EqProfileActivity.RESULT_PROFILE_SOURCE);
+                        String form = data.getStringExtra(EqProfileActivity.RESULT_PROFILE_FORM);
+                        if (pendingEqDeviceMac != null) {
+                            long entityId = EqAssignmentDao.bluetoothEntityId(pendingEqDeviceMac);
+                            if (name != null && !name.isEmpty()) {
+                                eqAssignmentDao.setAssignment(EqAssignmentDao.TYPE_BLUETOOTH,
+                                        entityId, name, source, form);
+                                Toast.makeText(this, R.string.bt_eq_saved, Toast.LENGTH_SHORT).show();
+                            } else {
+                                eqAssignmentDao.removeAssignment(EqAssignmentDao.TYPE_BLUETOOTH, entityId);
+                                Toast.makeText(this, R.string.bt_eq_removed, Toast.LENGTH_SHORT).show();
+                            }
+                            if (currentConfigDialog != null && currentConfigDialog.isShowing()) {
+                                TextView tvEq = currentConfigDialog.findViewById(R.id.tv_eq_assignment);
+                                if (tvEq != null) updateEqLabel(tvEq, pendingEqDeviceMac);
+                            }
+                            loadDevices();
+                            sendReloadEq();
+                        }
+                    }
+                });
 
         setupPermissionBanner();
         requestBluetoothPermission();
@@ -212,6 +250,7 @@ public class BluetoothCodecActivity extends AppCompatActivity
     private void updateActiveDevice() {
         BluetoothA2dp proxy = codecManager.getA2dpProxy();
         tvActiveDeviceSaved.setVisibility(View.GONE);
+        tvActiveDeviceEq.setVisibility(View.GONE);
 
         if (proxy == null) {
             tvActiveDeviceName.setText(R.string.bt_codec_no_active);
@@ -281,6 +320,16 @@ public class BluetoothCodecActivity extends AppCompatActivity
                 applyWithAssociationIfNeeded(active, savedConfig);
             }
         }
+
+        // Show EQ assignment for active device
+        long entityId = EqAssignmentDao.bluetoothEntityId(active.getAddress());
+        EqAssignmentDao.Assignment eqA = eqAssignmentDao.getAssignment(
+                EqAssignmentDao.TYPE_BLUETOOTH, entityId);
+        if (eqA != null && !eqA.profileName.isEmpty()) {
+            tvActiveDeviceEq.setText(getString(R.string.bt_eq_label, eqA.profileName));
+            tvActiveDeviceEq.setTextColor(getColor(R.color.green_bright));
+            tvActiveDeviceEq.setVisibility(View.VISIBLE);
+        }
     }
 
     @SuppressLint("MissingPermission")
@@ -320,6 +369,25 @@ public class BluetoothCodecActivity extends AppCompatActivity
         tvConfig.setLayoutParams(configParams);
         row.addView(tvConfig);
 
+        // EQ assignment line
+        long entityId = EqAssignmentDao.bluetoothEntityId(mac);
+        EqAssignmentDao.Assignment eqAssignment = eqAssignmentDao.getAssignment(
+                EqAssignmentDao.TYPE_BLUETOOTH, entityId);
+        TextView tvEq = new TextView(this);
+        if (eqAssignment != null && !eqAssignment.profileName.isEmpty()) {
+            tvEq.setText(getString(R.string.bt_eq_label, eqAssignment.profileName));
+            tvEq.setTextColor(getColor(R.color.green_bright));
+        } else {
+            tvEq.setText(getString(R.string.bt_eq_label, getString(R.string.bt_eq_none)));
+            tvEq.setTextColor(getColor(R.color.text_secondary));
+        }
+        tvEq.setTextSize(12);
+        LinearLayout.LayoutParams eqParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        eqParams.topMargin = dpToPx(2);
+        tvEq.setLayoutParams(eqParams);
+        row.addView(tvEq);
+
         row.setOnClickListener(v -> showConfigDialog(device));
         row.setClickable(true);
         row.setFocusable(true);
@@ -335,6 +403,37 @@ public class BluetoothCodecActivity extends AppCompatActivity
         BluetoothDeviceCodecConfig config = existing != null ? existing : BluetoothDeviceCodecConfig.defaults();
         config.deviceName = name;
 
+        // Query device codec capabilities
+        BluetoothCodecManager.CodecStatusResult statusResult =
+                codecManager.invokeGetCodecStatusResult(device);
+        List<BluetoothCodecConfig> selectableCaps = null;
+        if (statusResult.status != null) {
+            selectableCaps = statusResult.status.getCodecsSelectableCapabilities();
+        }
+
+        // Build codec list from capabilities or fall back to hardcoded
+        List<String> codecNameList = new ArrayList<>();
+        List<Integer> codecTypeList = new ArrayList<>();
+        final Map<Integer, BluetoothCodecConfig> capabilityMap = new HashMap<>();
+
+        if (selectableCaps != null && !selectableCaps.isEmpty()) {
+            for (BluetoothCodecConfig cap : selectableCaps) {
+                int type = cap.getCodecType();
+                if (type >= 0 && type <= 4 && !capabilityMap.containsKey(type)) {
+                    codecNameList.add(codecTypeName(type));
+                    codecTypeList.add(type);
+                    capabilityMap.put(type, cap);
+                }
+            }
+        }
+        if (codecNameList.isEmpty()) {
+            String[] all = {"SBC", "AAC", "aptX", "aptX HD", "LDAC"};
+            for (int i = 0; i < all.length; i++) {
+                codecNameList.add(all[i]);
+                codecTypeList.add(i);
+            }
+        }
+
         View dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_codec_config, null);
 
         TextView tvDeviceName = dialogView.findViewById(R.id.dialog_device_name);
@@ -347,11 +446,12 @@ public class BluetoothCodecActivity extends AppCompatActivity
         TextView labelLdacQuality = dialogView.findViewById(R.id.label_ldac_quality);
 
         // Codec spinner
-        String[] codecNames = {"SBC", "AAC", "aptX", "aptX HD", "LDAC"};
+        String[] codecNames = codecNameList.toArray(new String[0]);
         ArrayAdapter<String> codecAdapter = new ArrayAdapter<>(this,
                 android.R.layout.simple_spinner_item, codecNames);
         codecAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         spinnerCodec.setAdapter(codecAdapter);
+        spinnerCodec.setTag(codecTypeList);
 
         // LDAC quality spinner
         String[] ldacQualities = {"990 kbps (Best)", "660 kbps (Standard)", "330 kbps (Mobile)", "Adaptive"};
@@ -363,9 +463,20 @@ public class BluetoothCodecActivity extends AppCompatActivity
         // Update sample rate and bit depth spinners based on codec selection
         spinnerCodec.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override
+            @SuppressWarnings("unchecked")
             public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
-                updateRateAndBitSpinners(position, spinnerSampleRate, spinnerBitDepth);
-                boolean isLdac = (position == BluetoothDeviceCodecConfig.CODEC_LDAC);
+                List<Integer> codecTypes = (List<Integer>) spinnerCodec.getTag();
+                int selectedCodecType = (codecTypes != null && position < codecTypes.size())
+                        ? codecTypes.get(position) : position;
+
+                BluetoothCodecConfig cap = capabilityMap.get(selectedCodecType);
+                if (cap != null) {
+                    updateRateAndBitSpinnersFromCapability(cap, spinnerSampleRate, spinnerBitDepth);
+                } else {
+                    updateRateAndBitSpinners(selectedCodecType, spinnerSampleRate, spinnerBitDepth);
+                }
+
+                boolean isLdac = (selectedCodecType == BluetoothDeviceCodecConfig.CODEC_LDAC);
                 labelLdacQuality.setVisibility(isLdac ? View.VISIBLE : View.GONE);
                 spinnerLdacQuality.setVisibility(isLdac ? View.VISIBLE : View.GONE);
             }
@@ -375,14 +486,52 @@ public class BluetoothCodecActivity extends AppCompatActivity
             }
         });
 
-        // Set initial values
-        spinnerCodec.setSelection(config.codecType);
+        // Set initial values — find position matching saved codec type
+        int codecPos = 0;
+        for (int i = 0; i < codecTypeList.size(); i++) {
+            if (codecTypeList.get(i) == config.codecType) {
+                codecPos = i;
+                break;
+            }
+        }
+        spinnerCodec.setSelection(codecPos);
         spinnerLdacQuality.setSelection((int) config.codecSpecific1);
 
         // Defer setting rate/bit selections until spinners are populated
         spinnerCodec.post(() -> {
             selectSampleRate(spinnerSampleRate, config.sampleRate);
             selectBitDepth(spinnerBitDepth, config.bitsPerSample);
+        });
+
+        // EQ section
+        TextView tvEqAssignment = dialogView.findViewById(R.id.tv_eq_assignment);
+        TextView btnChooseEq = dialogView.findViewById(R.id.btn_choose_eq);
+        TextView btnRemoveEq = dialogView.findViewById(R.id.btn_remove_eq);
+
+        updateEqLabel(tvEqAssignment, mac);
+
+        btnChooseEq.setOnClickListener(v -> {
+            pendingEqDeviceMac = mac;
+            Intent intent = new Intent(this, EqProfileActivity.class);
+            intent.putExtra(EqProfileActivity.EXTRA_PICK_MODE, true);
+            long eqEntityId = EqAssignmentDao.bluetoothEntityId(mac);
+            EqAssignmentDao.Assignment current = eqAssignmentDao.getAssignment(
+                    EqAssignmentDao.TYPE_BLUETOOTH, eqEntityId);
+            if (current != null) {
+                intent.putExtra(EqProfileActivity.EXTRA_PRESELECTED_NAME, current.profileName);
+                intent.putExtra(EqProfileActivity.EXTRA_PRESELECTED_SOURCE, current.profileSource);
+                intent.putExtra(EqProfileActivity.EXTRA_PRESELECTED_FORM, current.profileForm);
+            }
+            eqPickLauncher.launch(intent);
+        });
+
+        btnRemoveEq.setOnClickListener(v -> {
+            long eqEntityId = EqAssignmentDao.bluetoothEntityId(mac);
+            eqAssignmentDao.removeAssignment(EqAssignmentDao.TYPE_BLUETOOTH, eqEntityId);
+            updateEqLabel(tvEqAssignment, mac);
+            Toast.makeText(this, R.string.bt_eq_removed, Toast.LENGTH_SHORT).show();
+            loadDevices();
+            sendReloadEq();
         });
 
         AlertDialog dialog = new AlertDialog.Builder(this, R.style.Theme_Media_player_Dialog)
@@ -419,6 +568,8 @@ public class BluetoothCodecActivity extends AppCompatActivity
         });
 
         dialog.show();
+        currentConfigDialog = dialog;
+        dialog.setOnDismissListener(d -> currentConfigDialog = null);
     }
 
     private void updateRateAndBitSpinners(int codecType, Spinner rateSpinner, Spinner bitSpinner) {
@@ -503,7 +654,14 @@ public class BluetoothCodecActivity extends AppCompatActivity
             Spinner codecSpinner, Spinner rateSpinner, Spinner bitSpinner,
             Spinner ldacSpinner) {
         BluetoothDeviceCodecConfig config = new BluetoothDeviceCodecConfig();
-        config.codecType = codecSpinner.getSelectedItemPosition();
+
+        List<Integer> codecTypes = (List<Integer>) codecSpinner.getTag();
+        int pos = codecSpinner.getSelectedItemPosition();
+        if (codecTypes != null && pos < codecTypes.size()) {
+            config.codecType = codecTypes.get(pos);
+        } else {
+            config.codecType = pos;
+        }
         config.channelMode = BluetoothDeviceCodecConfig.CHANNEL_STEREO;
 
         List<Integer> rateMasks = (List<Integer>) rateSpinner.getTag();
@@ -646,6 +804,71 @@ public class BluetoothCodecActivity extends AppCompatActivity
     public void onCodecConfigAppliedUnverified(BluetoothDevice device) {
         Toast.makeText(this, R.string.bt_codec_applied_unverified, Toast.LENGTH_SHORT).show();
         loadDevices();
+    }
+
+    private void updateRateAndBitSpinnersFromCapability(BluetoothCodecConfig capability,
+                                                         Spinner rateSpinner, Spinner bitSpinner) {
+        List<String> rates = new ArrayList<>();
+        List<Integer> rateMasks = new ArrayList<>();
+        List<String> bits = new ArrayList<>();
+        List<Integer> bitMasks = new ArrayList<>();
+
+        int sampleRateMask = capability.getSampleRate();
+        if ((sampleRateMask & 0x1) != 0) { rates.add("44.1 kHz"); rateMasks.add(BluetoothDeviceCodecConfig.SAMPLE_RATE_44100); }
+        if ((sampleRateMask & 0x2) != 0) { rates.add("48 kHz");   rateMasks.add(BluetoothDeviceCodecConfig.SAMPLE_RATE_48000); }
+        if ((sampleRateMask & 0x4) != 0) { rates.add("88.2 kHz"); rateMasks.add(BluetoothDeviceCodecConfig.SAMPLE_RATE_88200); }
+        if ((sampleRateMask & 0x8) != 0) { rates.add("96 kHz");   rateMasks.add(BluetoothDeviceCodecConfig.SAMPLE_RATE_96000); }
+
+        int bitsMask = capability.getBitsPerSample();
+        if ((bitsMask & 0x1) != 0) { bits.add("16-bit"); bitMasks.add(BluetoothDeviceCodecConfig.BITS_16); }
+        if ((bitsMask & 0x2) != 0) { bits.add("24-bit"); bitMasks.add(BluetoothDeviceCodecConfig.BITS_24); }
+        if ((bitsMask & 0x4) != 0) { bits.add("32-bit"); bitMasks.add(BluetoothDeviceCodecConfig.BITS_32); }
+
+        // Fallback if bitmasks are zero
+        if (rates.isEmpty()) { rates.add("44.1 kHz"); rateMasks.add(BluetoothDeviceCodecConfig.SAMPLE_RATE_44100); }
+        if (bits.isEmpty()) { bits.add("16-bit"); bitMasks.add(BluetoothDeviceCodecConfig.BITS_16); }
+
+        ArrayAdapter<String> rateAdapter = new ArrayAdapter<>(this,
+                android.R.layout.simple_spinner_item, rates);
+        rateAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        rateSpinner.setAdapter(rateAdapter);
+        rateSpinner.setTag(rateMasks);
+
+        ArrayAdapter<String> bitAdapter = new ArrayAdapter<>(this,
+                android.R.layout.simple_spinner_item, bits);
+        bitAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        bitSpinner.setAdapter(bitAdapter);
+        bitSpinner.setTag(bitMasks);
+    }
+
+    private static String codecTypeName(int type) {
+        switch (type) {
+            case 0: return "SBC";
+            case 1: return "AAC";
+            case 2: return "aptX";
+            case 3: return "aptX HD";
+            case 4: return "LDAC";
+            default: return "Unknown";
+        }
+    }
+
+    private void updateEqLabel(TextView tvEqAssignment, String mac) {
+        long entityId = EqAssignmentDao.bluetoothEntityId(mac);
+        EqAssignmentDao.Assignment assignment = eqAssignmentDao.getAssignment(
+                EqAssignmentDao.TYPE_BLUETOOTH, entityId);
+        if (assignment != null && !assignment.profileName.isEmpty()) {
+            tvEqAssignment.setText(getString(R.string.bt_eq_label, assignment.profileName));
+            tvEqAssignment.setTextColor(getColor(R.color.green_bright));
+        } else {
+            tvEqAssignment.setText(getString(R.string.bt_eq_label, getString(R.string.bt_eq_none)));
+            tvEqAssignment.setTextColor(getColor(R.color.text_secondary));
+        }
+    }
+
+    private void sendReloadEq() {
+        Intent intent = new Intent(this, MusicService.class);
+        intent.setAction(MusicService.ACTION_RELOAD_EQ);
+        startService(intent);
     }
 
     private int dpToPx(int dp) {

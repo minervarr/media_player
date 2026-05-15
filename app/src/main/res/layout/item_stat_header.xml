@@ -6,8 +6,8 @@
     android:gravity="center_vertical"
     android:paddingStart="16dp"
     android:paddingEnd="16dp"
-    android:paddingTop="16dp"
-    android:paddingBottom="8dp"
+    android:paddingTop="20dp"
+    android:paddingBottom="10dp"
     android:background="@color/bg_primary">
 
     <TextView
@@ -15,8 +15,10 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:textColor="@color/green_bright"
-        android:textSize="14sp"
-        android:textStyle="bold" />
+        android:textSize="13sp"
+        android:textStyle="bold"
+        android:textAllCaps="true"
+        android:letterSpacing="0.08" />
 
     <TextView
         android:id="@+id/tv_header_summary"

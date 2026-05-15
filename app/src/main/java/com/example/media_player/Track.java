@@ -4,7 +4,7 @@ import android.net.Uri;
 
 public class Track {
 
-    public enum Source { LOCAL, TIDAL }
+    public enum Source { LOCAL, TIDAL, QOBUZ }
 
     public final long id;
     public final String title;
@@ -20,6 +20,7 @@ public class Track {
     public final String folderName;
     public final Source source;
     public final String tidalTrackId;
+    public final String qobuzTrackId;
     public final String artworkUrl;
 
     // Extended metadata
@@ -37,7 +38,7 @@ public class Track {
                  String album, long albumId, int trackNumber, int year,
                  String folderPath, String folderName) {
         this(id, title, artist, durationMs, uri, album, albumId, trackNumber, 1, year,
-                folderPath, folderName, Source.LOCAL, null, null,
+                folderPath, folderName, Source.LOCAL, null, null, null,
                 null, null, null, 0, 0, 0, 0, null);
     }
 
@@ -48,7 +49,7 @@ public class Track {
                  String albumArtist, String genre, String composer,
                  int bitrate, int sampleRate, int bitDepth, int channels, String format) {
         this(id, title, artist, durationMs, uri, album, albumId, trackNumber, discNumber, year,
-                folderPath, folderName, Source.LOCAL, null, null,
+                folderPath, folderName, Source.LOCAL, null, null, null,
                 albumArtist, genre, composer, bitrate, sampleRate, bitDepth, channels, format);
     }
 
@@ -56,7 +57,7 @@ public class Track {
     Track(long id, String title, String artist, long durationMs, Uri uri,
           String album, long albumId, int trackNumber, int discNumber, int year,
           String folderPath, String folderName, Source source,
-          String tidalTrackId, String artworkUrl,
+          String tidalTrackId, String qobuzTrackId, String artworkUrl,
           String albumArtist, String genre, String composer,
           int bitrate, int sampleRate, int bitDepth, int channels, String format) {
         this.id = id;
@@ -73,6 +74,7 @@ public class Track {
         this.folderName = folderName;
         this.source = source;
         this.tidalTrackId = tidalTrackId;
+        this.qobuzTrackId = qobuzTrackId;
         this.artworkUrl = artworkUrl;
         this.albumArtist = albumArtist;
         this.genre = genre;
@@ -87,9 +89,10 @@ public class Track {
     /** Tidal constructor (private). */
     private Track(long id, String title, String artist, long durationMs,
                   String album, long albumId, int trackNumber,
-                  String tidalTrackId, String artworkUrl) {
+                  Source source, String tidalTrackId, String qobuzTrackId,
+                  String artworkUrl) {
         this(id, title, artist, durationMs, null, album, albumId, trackNumber, 1, 0,
-                "", "", Source.TIDAL, tidalTrackId, artworkUrl,
+                "", "", source, tidalTrackId, qobuzTrackId, artworkUrl,
                 null, null, null, 0, 0, 0, 0, null);
     }
 
@@ -99,7 +102,16 @@ public class Track {
         long id = ("tidal:" + tidalId).hashCode();
         long albumId = ("tidal_album:" + tidalAlbumId).hashCode();
         return new Track(id, title, artist, durationMs, album, albumId, trackNumber,
-                String.valueOf(tidalId), artworkUrl);
+                Source.TIDAL, String.valueOf(tidalId), null, artworkUrl);
+    }
+
+    public static Track qobuzTrack(long qobuzId, String title, String artist, long durationMs,
+                                    String album, String qobuzAlbumId, int trackNumber,
+                                    String artworkUrl) {
+        long id = ("qobuz:" + qobuzId).hashCode();
+        long albumId = ("qobuz_album:" + qobuzAlbumId).hashCode();
+        return new Track(id, title, artist, durationMs, album, albumId, trackNumber,
+                Source.QOBUZ, null, String.valueOf(qobuzId), artworkUrl);
     }
 
     public String getFormattedDuration() {
