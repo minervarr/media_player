@@ -1,3 +1,6 @@
 [submodule "audioengine"]
 	path = audioengine
 	url = https://github.com/minervarr/audio_engine.git
+[submodule "app/src/main/cpp/libjpeg-turbo"]
+	path = app/src/main/cpp/libjpeg-turbo
+	url = https://github.com/libjpeg-turbo/libjpeg-turbo.git

@@ -16,4 +16,3 @@ logcat_*.txt
 .cxx
 local.properties
 /screenshots/
-app/src/main/cpp/libjpeg-turbo/
