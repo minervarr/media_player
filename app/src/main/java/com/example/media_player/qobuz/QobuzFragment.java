@@ -240,7 +240,9 @@ public class QobuzFragment extends Fragment
 
         executor.execute(() -> {
             try {
-                auth.init();
+                if (!auth.isInitialized()) {
+                    auth.init();
+                }
                 boolean restored = auth.restoreSession();
                 mainHandler.post(() -> {
                     if (restored && auth.isLoggedIn()) {

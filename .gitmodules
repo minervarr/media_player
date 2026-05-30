@@ -4,3 +4,6 @@
 [submodule "app/src/main/cpp/libjpeg-turbo"]
 	path = app/src/main/cpp/libjpeg-turbo
 	url = https://github.com/libjpeg-turbo/libjpeg-turbo.git
+[submodule "qobuz_android"]
+	path = qobuz_android
+	url = https://github.com/minervarr/qobuz_android.git

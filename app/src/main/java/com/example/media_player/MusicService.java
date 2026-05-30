@@ -28,6 +28,7 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.os.PowerManager;
 import android.os.SystemClock;
 import android.support.v4.media.MediaMetadataCompat;
 import android.support.v4.media.session.MediaSessionCompat;
@@ -127,6 +128,7 @@ public class MusicService extends Service implements UsbAudioManager.UsbAudioLis
     private PlaybackCallback callback;
     private boolean foregroundStarted;
     private boolean noisyReceiverRegistered;
+    private PowerManager.WakeLock wakeLock;
 
     private final BroadcastReceiver becomingNoisyReceiver = new BroadcastReceiver() {
         @Override
@@ -516,6 +518,7 @@ public class MusicService extends Service implements UsbAudioManager.UsbAudioLis
         usbExecutor.shutdownNow();
         tidalExecutor.shutdownNow();
         qobuzExecutor.shutdownNow();
+        releaseWakeLock();
         abandonAudioFocus();
         super.onDestroy();
     }
@@ -594,6 +597,8 @@ public class MusicService extends Service implements UsbAudioManager.UsbAudioLis
             fireError("Could not get audio focus");
             return;
         }
+
+        acquireWakeLock();
 
         // Record play start
         currentPlayHistoryId = statsDao.recordPlayStart(track, resolveOutputDeviceName());
@@ -881,6 +886,7 @@ public class MusicService extends Service implements UsbAudioManager.UsbAudioLis
     private void handlePause() {
         if (audioEngine != null && audioEngine.isPlaying()) {
             audioEngine.pause();
+            releaseWakeLock();
             updatePlaybackState();
             updateNotificationForCurrentTrack();
             fireCallback(() -> { if (callback != null) callback.onPlayStateChanged(false); });
@@ -890,6 +896,7 @@ public class MusicService extends Service implements UsbAudioManager.UsbAudioLis
     private void handleResume() {
         if (audioEngine != null && !audioEngine.isPlaying()) {
             if (!requestAudioFocus()) return;
+            acquireWakeLock();
             audioEngine.resume();
             updatePlaybackState();
             updateNotificationForCurrentTrack();
@@ -1092,6 +1099,7 @@ public class MusicService extends Service implements UsbAudioManager.UsbAudioLis
                         case AudioManager.AUDIOFOCUS_GAIN:
                             hasAudioFocus = true;
                             if (pausedByFocusLoss && audioEngine != null) {
+                                acquireWakeLock();
                                 audioEngine.resume();
                                 pausedByFocusLoss = false;
                                 updatePlaybackState();
@@ -1106,6 +1114,7 @@ public class MusicService extends Service implements UsbAudioManager.UsbAudioLis
                             pausedByFocusLoss = false;
                             if (audioEngine != null && audioEngine.isPlaying()) {
                                 audioEngine.pause();
+                                releaseWakeLock();
                                 updatePlaybackState();
                                 updateNotificationForCurrentTrack();
                                 fireCallback(() -> {
@@ -1118,6 +1127,7 @@ public class MusicService extends Service implements UsbAudioManager.UsbAudioLis
                             hasAudioFocus = false;
                             if (audioEngine != null && audioEngine.isPlaying()) {
                                 audioEngine.pause();
+                                releaseWakeLock();
                                 pausedByFocusLoss = true;
                                 updatePlaybackState();
                                 updateNotificationForCurrentTrack();
@@ -1133,6 +1143,22 @@ public class MusicService extends Service implements UsbAudioManager.UsbAudioLis
         int result = audioManager.requestAudioFocus(audioFocusRequest);
         hasAudioFocus = (result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED);
         return hasAudioFocus;
+    }
+
+    private void acquireWakeLock() {
+        if (wakeLock == null) {
+            PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+            wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "MatrixPlayer::PlaybackLock");
+        }
+        if (!wakeLock.isHeld()) {
+            wakeLock.acquire();
+        }
+    }
+
+    private void releaseWakeLock() {
+        if (wakeLock != null && wakeLock.isHeld()) {
+            wakeLock.release();
+        }
     }
 
     private void abandonAudioFocus() {

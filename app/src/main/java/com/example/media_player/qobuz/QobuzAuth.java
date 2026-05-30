@@ -13,10 +13,13 @@ import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
@@ -46,6 +49,8 @@ public class QobuzAuth {
 
     private static final long TEST_TRACK_ID = 5966783L;
 
+    private static volatile boolean sNativeInitDone = false;
+
     private final SharedPreferences prefs;
 
     private String appId;
@@ -59,6 +64,10 @@ public class QobuzAuth {
     public QobuzAuth(Context context) {
         prefs = context.getApplicationContext()
                 .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        if (!sNativeInitDone) {
+            QobuzNative.initAndroid(context);
+            sNativeInitDone = true;
+        }
         userAuthToken = prefs.getString(KEY_AUTH_TOKEN, null);
         userId = prefs.getLong(KEY_USER_ID, 0);
         displayName = prefs.getString(KEY_DISPLAY_NAME, "");
@@ -77,6 +86,7 @@ public class QobuzAuth {
     }
 
     public String getAppId() { return appId; }
+    public String getAppSecret() { return validatedSecret; }
     public String getUserAuthToken() { return userAuthToken; }
     public String getValidatedSecret() { return validatedSecret; }
     public String getPrivateKey() { return privateKey; }
@@ -463,6 +473,48 @@ public class QobuzAuth {
                 .remove(KEY_DISPLAY_NAME)
                 .remove(KEY_SUBSCRIPTION)
                 .apply();
+    }
+
+    // ---- Signed URL builder ----
+
+    /**
+     * Signs a GET request and returns the full URL with request_sig appended.
+     * Matches the algorithm in signing.rs: MD5("GET" + endpoint + sorted(key+val)... + secret).
+     */
+    public String buildSignedUrl(String endpoint, Map<String, String> extraParams)
+            throws IOException {
+        long ts = System.currentTimeMillis() / 1000;
+        Map<String, String> p = new LinkedHashMap<>(extraParams);
+        p.put("app_id", appId);
+        p.put("request_ts", String.valueOf(ts));
+        p.put("request_sig", signRequest("GET", endpoint, p, validatedSecret));
+        StringBuilder url = new StringBuilder("https://www.qobuz.com/api.json/0.2")
+                .append(endpoint).append("?");
+        boolean first = true;
+        for (Map.Entry<String, String> e : p.entrySet()) {
+            if (!first) url.append('&');
+            url.append(URLEncoder.encode(e.getKey(), "UTF-8"))
+               .append('=').append(URLEncoder.encode(e.getValue(), "UTF-8"));
+            first = false;
+        }
+        return url.toString();
+    }
+
+    static String signRequest(String method, String endpoint,
+                               Map<String, String> params, String secret) {
+        List<String> keys = new ArrayList<>(params.keySet());
+        Collections.sort(keys);
+        StringBuilder sb = new StringBuilder(method).append(endpoint);
+        for (String k : keys) sb.append(k).append(params.get(k));
+        sb.append(secret);
+        return md5Hex(sb.toString());
+    }
+
+    /** Replaces the "600" size token in a Qobuz image URL with "org" for full resolution. */
+    static String coverOrgUrl(String url) {
+        if (url == null || url.isEmpty()) return "";
+        int i = url.lastIndexOf("600");
+        return i >= 0 ? url.substring(0, i) + "org" + url.substring(i + 3) : url;
     }
 
     // ---- Request signing ----
