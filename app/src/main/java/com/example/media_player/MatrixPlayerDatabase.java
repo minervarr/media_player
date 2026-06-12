@@ -9,7 +9,7 @@ public class MatrixPlayerDatabase extends SQLiteOpenHelper {
 
     private static final String TAG = "MatrixPlayerDB";
     private static final String DB_NAME = "matrix_player.db";
-    private static final int DB_VERSION = 4;
+    private static final int DB_VERSION = 6;
 
     private static volatile MatrixPlayerDatabase instance;
 
@@ -95,6 +95,8 @@ public class MatrixPlayerDatabase extends SQLiteOpenHelper {
             + "source          INTEGER NOT NULL DEFAULT 0,"
             + "tidal_album_id  INTEGER,"
             + "tidal_quality   TEXT,"
+            + "avg_sample_rate INTEGER NOT NULL DEFAULT 0,"
+            + "has_dsd         INTEGER NOT NULL DEFAULT 0,"
             + "created_at      INTEGER NOT NULL DEFAULT (strftime('%s','now') * 1000),"
             + "updated_at      INTEGER NOT NULL DEFAULT (strftime('%s','now') * 1000)"
             + ")";
@@ -388,6 +390,12 @@ public class MatrixPlayerDatabase extends SQLiteOpenHelper {
         if (oldVersion < 4) {
             migrate_v3_to_v4(db);
         }
+        if (oldVersion < 5) {
+            migrate_v4_to_v5(db);
+        }
+        if (oldVersion < 6) {
+            migrate_v5_to_v6(db);
+        }
     }
 
     /**
@@ -496,5 +504,44 @@ public class MatrixPlayerDatabase extends SQLiteOpenHelper {
         db.execSQL(SQL_CREATE_ARTWORK_CACHE);
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_eq_assignments_profile ON eq_assignments(profile_name)");
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_artwork_cache_fetched ON artwork_cache(fetched_at ASC)");
+    }
+
+    private void migrate_v4_to_v5(SQLiteDatabase db) {
+        Log.d(TAG, "migrate_v4_to_v5: recalculating album_id for local tracks");
+        try (android.database.Cursor c = db.rawQuery("SELECT id, album, artist, folder_path, folder_name FROM tracks WHERE source = 0", null)) {
+            while (c.moveToNext()) {
+                long id = c.getLong(0);
+                String album = c.getString(1);
+                String artist = c.getString(2);
+                String folderPath = c.getString(3);
+                String folderName = c.getString(4);
+
+                String albumGroupFolder = folderPath;
+                if (folderName != null && folderName.toLowerCase(java.util.Locale.ROOT).matches("^(cd|disc)[\\s-]*\\d+$")) {
+                    java.io.File parent = new java.io.File(folderPath);
+                    if (parent.getParentFile() != null) {
+                        albumGroupFolder = parent.getParentFile().getAbsolutePath();
+                    }
+                }
+                long albumId = (long) (album + artist + albumGroupFolder).hashCode();
+                db.execSQL("UPDATE tracks SET album_id = ? WHERE id = ?", new Object[]{albumId, id});
+            }
+        }
+        db.execSQL("DELETE FROM albums"); // Will be rebuilt by AlbumDao.rebuildAlbums()
+    }
+
+    private void migrate_v5_to_v6(SQLiteDatabase db) {
+        Log.d(TAG, "migrate_v5_to_v6: adding avg_sample_rate and has_dsd to albums");
+        try {
+            db.execSQL("ALTER TABLE albums ADD COLUMN avg_sample_rate INTEGER NOT NULL DEFAULT 0");
+        } catch (Exception e) {
+            Log.w(TAG, "avg_sample_rate column may already exist: " + e.getMessage());
+        }
+        try {
+            db.execSQL("ALTER TABLE albums ADD COLUMN has_dsd INTEGER NOT NULL DEFAULT 0");
+        } catch (Exception e) {
+            Log.w(TAG, "has_dsd column may already exist: " + e.getMessage());
+        }
+        db.execSQL("DELETE FROM albums"); // Will be rebuilt by AlbumDao.rebuildAlbums()
     }
 }

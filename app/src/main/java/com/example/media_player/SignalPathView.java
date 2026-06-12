@@ -299,7 +299,7 @@ public class SignalPathView extends View {
         if (info == null || !info.eqActive) return new String[]{"--"};
         return new String[]{
                 info.eqProfileName != null ? info.eqProfileName : "Unknown",
-                "Parametric EQ (10-band biquad)"
+                "Parametric EQ (64-bit precision biquad)"
         };
     }
 

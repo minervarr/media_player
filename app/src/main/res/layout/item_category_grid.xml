@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="vertical"
@@ -11,9 +12,11 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:scaleType="centerCrop"
+        android:padding="2.5dp"
+        app:strokeWidth="2.5dp"
+        app:strokeColor="@android:color/transparent"
         android:background="@drawable/bg_artwork_rounded"
-        android:outlineProvider="background"
-        android:clipToOutline="true" />
+        app:shapeAppearanceOverlay="@style/RoundedCorner6" />
 
     <TextView
         android:id="@+id/tv_category_title"

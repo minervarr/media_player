@@ -23,6 +23,9 @@
         android:layout_width="48dp"
         android:layout_height="48dp"
         android:scaleType="centerCrop"
+        android:padding="2dp"
+        app:strokeWidth="2dp"
+        app:strokeColor="@android:color/transparent"
         android:background="@drawable/bg_artwork_rounded_sm"
         app:shapeAppearanceOverlay="@style/RoundedCorner4" />
 

@@ -49,6 +49,7 @@ import com.nerio.audioengine.UsbAudioOutput;
 
 import com.example.media_player.qobuz.QobuzApi;
 import com.example.media_player.qobuz.QobuzAuth;
+import com.example.media_player.qobuz.QobuzClient;
 import com.example.media_player.qobuz.QobuzModels;
 import com.example.media_player.tidal.DashFlacDataSource;
 import com.example.media_player.tidal.HttpMediaDataSource;
@@ -518,6 +519,7 @@ public class MusicService extends Service implements UsbAudioManager.UsbAudioLis
         usbExecutor.shutdownNow();
         tidalExecutor.shutdownNow();
         qobuzExecutor.shutdownNow();
+        QobuzClient.get(this).destroy();
         releaseWakeLock();
         abandonAudioFocus();
         super.onDestroy();

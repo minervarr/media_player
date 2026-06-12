@@ -3,9 +3,9 @@ package com.example.media_player;
 import android.content.Context;
 import android.util.AttributeSet;
 
-import androidx.appcompat.widget.AppCompatImageView;
+import com.google.android.material.imageview.ShapeableImageView;
 
-public class SquareImageView extends AppCompatImageView {
+public class SquareImageView extends ShapeableImageView {
 
     public SquareImageView(Context context) {
         super(context);

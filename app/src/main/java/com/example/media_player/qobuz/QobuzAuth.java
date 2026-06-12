@@ -13,13 +13,10 @@ import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
-import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
@@ -49,9 +46,8 @@ public class QobuzAuth {
 
     private static final long TEST_TRACK_ID = 5966783L;
 
-    private static volatile boolean sNativeInitDone = false;
-
     private final SharedPreferences prefs;
+    private final QobuzClient client;
 
     private String appId;
     private String validatedSecret;
@@ -64,10 +60,7 @@ public class QobuzAuth {
     public QobuzAuth(Context context) {
         prefs = context.getApplicationContext()
                 .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-        if (!sNativeInitDone) {
-            QobuzNative.initAndroid(context);
-            sNativeInitDone = true;
-        }
+        client = QobuzClient.get(context);
         userAuthToken = prefs.getString(KEY_AUTH_TOKEN, null);
         userId = prefs.getLong(KEY_USER_ID, 0);
         displayName = prefs.getString(KEY_DISPLAY_NAME, "");
@@ -75,6 +68,16 @@ public class QobuzAuth {
         validatedSecret = prefs.getString(KEY_SECRET, null);
         privateKey = prefs.getString(KEY_PRIVATE_KEY, null);
         subscriptionLabel = prefs.getString(KEY_SUBSCRIPTION, "");
+        if (isInitialized()) {
+            client.setCredentials(appId, validatedSecret);
+        }
+        if (userAuthToken != null) {
+            client.setAuthToken(userAuthToken);
+        }
+    }
+
+    public QobuzClient getClient() {
+        return client;
     }
 
     public boolean isLoggedIn() {
@@ -156,6 +159,8 @@ public class QobuzAuth {
                 .putString(KEY_SECRET, validatedSecret)
                 .putString(KEY_PRIVATE_KEY, privateKey)
                 .apply();
+
+        client.setCredentials(appId, validatedSecret);
     }
 
     static String extractBundleUrl(String html) {
@@ -386,38 +391,18 @@ public class QobuzAuth {
     }
 
     /**
-     * Restore session from a saved user_auth_token.
+     * Restore session from a saved user_auth_token by validating it through
+     * the native client. Display name and subscription stay as persisted.
      * init() must be called first.
      */
     public boolean restoreSession() throws IOException {
         if (appId == null || userAuthToken == null) return false;
 
-        String url = API_BASE + "/user/login";
-        HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
-        conn.setRequestMethod("POST");
-        conn.setRequestProperty("User-Agent", USER_AGENT);
-        conn.setRequestProperty("X-App-Id", appId);
-        conn.setRequestProperty("X-User-Auth-Token", userAuthToken);
-        conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
-        conn.setDoOutput(true);
-        conn.setConnectTimeout(15000);
-        conn.setReadTimeout(15000);
-
-        try (OutputStream os = conn.getOutputStream()) {
-            os.write("extra=partner".getBytes(StandardCharsets.UTF_8));
-        }
-
-        int code = conn.getResponseCode();
-        if (code != 200) {
-            conn.disconnect();
-            Log.w(TAG, "restoreSession failed: HTTP " + code);
+        if (!client.loginWithToken(String.valueOf(userId), userAuthToken)) {
+            Log.w(TAG, "restoreSession: token rejected");
             return false;
         }
-
-        String body = readResponse(conn);
-        conn.disconnect();
-
-        return parseLoginResponse(body);
+        return true;
     }
 
     private boolean parseLoginResponse(String body) {
@@ -454,6 +439,8 @@ public class QobuzAuth {
                     .putString(KEY_SUBSCRIPTION, subscriptionLabel)
                     .apply();
 
+            client.setAuthToken(userAuthToken);
+
             Log.d(TAG, "login success: " + displayName + " (" + subscriptionLabel + ")");
             return true;
         } catch (Exception e) {
@@ -473,41 +460,7 @@ public class QobuzAuth {
                 .remove(KEY_DISPLAY_NAME)
                 .remove(KEY_SUBSCRIPTION)
                 .apply();
-    }
-
-    // ---- Signed URL builder ----
-
-    /**
-     * Signs a GET request and returns the full URL with request_sig appended.
-     * Matches the algorithm in signing.rs: MD5("GET" + endpoint + sorted(key+val)... + secret).
-     */
-    public String buildSignedUrl(String endpoint, Map<String, String> extraParams)
-            throws IOException {
-        long ts = System.currentTimeMillis() / 1000;
-        Map<String, String> p = new LinkedHashMap<>(extraParams);
-        p.put("app_id", appId);
-        p.put("request_ts", String.valueOf(ts));
-        p.put("request_sig", signRequest("GET", endpoint, p, validatedSecret));
-        StringBuilder url = new StringBuilder("https://www.qobuz.com/api.json/0.2")
-                .append(endpoint).append("?");
-        boolean first = true;
-        for (Map.Entry<String, String> e : p.entrySet()) {
-            if (!first) url.append('&');
-            url.append(URLEncoder.encode(e.getKey(), "UTF-8"))
-               .append('=').append(URLEncoder.encode(e.getValue(), "UTF-8"));
-            first = false;
-        }
-        return url.toString();
-    }
-
-    static String signRequest(String method, String endpoint,
-                               Map<String, String> params, String secret) {
-        List<String> keys = new ArrayList<>(params.keySet());
-        Collections.sort(keys);
-        StringBuilder sb = new StringBuilder(method).append(endpoint);
-        for (String k : keys) sb.append(k).append(params.get(k));
-        sb.append(secret);
-        return md5Hex(sb.toString());
+        client.destroy();
     }
 
     /** Replaces the "600" size token in a Qobuz image URL with "org" for full resolution. */
@@ -517,16 +470,12 @@ public class QobuzAuth {
         return i >= 0 ? url.substring(0, i) + "org" + url.substring(i + 3) : url;
     }
 
-    // ---- Request signing ----
+    // ---- Request signing (used only by secret validation during init) ----
 
     /**
      * MD5 signature for /track/getFileUrl.
      * Format: MD5("trackgetFileUrl" + "format_id{FID}intentstreamtrack_id{TID}" + timestamp + secret)
      */
-    public String signFileUrl(long trackId, int formatId, long timestamp) {
-        return signFileUrl(trackId, formatId, timestamp, validatedSecret);
-    }
-
     static String signFileUrl(long trackId, int formatId, long timestamp, String secret) {
         String raw = "trackgetFileUrl"
                 + "format_id" + formatId
@@ -534,15 +483,6 @@ public class QobuzAuth {
                 + "track_id" + trackId
                 + timestamp
                 + secret;
-        return md5Hex(raw);
-    }
-
-    /**
-     * MD5 signature for /favorite/getUserFavorites.
-     * Format: MD5("favoritegetUserFavorites" + "" + timestamp + secret)
-     */
-    public String signFavorites(long timestamp) {
-        String raw = "favoritegetUserFavorites" + timestamp + validatedSecret;
         return md5Hex(raw);
     }
 

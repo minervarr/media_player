@@ -10,6 +10,8 @@ import android.graphics.Bitmap;
 import android.bluetooth.BluetoothDevice;
 import android.media.AudioDeviceInfo;
 import android.media.AudioManager;
+import android.media.MediaExtractor;
+import android.media.MediaFormat;
 import android.media.MediaMetadataRetriever;
 import android.net.Uri;
 import android.os.Bundle;
@@ -908,7 +910,18 @@ public class MainActivity extends AppCompatActivity
         if (!cachedPaths.isEmpty()) {
             Map<String, Track> cachedTracks = trackDao.loadTracksByFilePaths(
                     new HashSet<>(cachedPaths));
-            tracks.addAll(cachedTracks.values());
+            // Rescan tracks that are missing sample_rate (legacy data before MediaExtractor probe)
+            for (Map.Entry<String, Track> entry : cachedTracks.entrySet()) {
+                Track t = entry.getValue();
+                if (t.sampleRate == 0 && t.source == Track.Source.LOCAL) {
+                    File f = new File(entry.getKey());
+                    if (f.exists()) {
+                        filesToScan.add(f);
+                        continue;
+                    }
+                }
+                tracks.add(t);
+            }
         }
 
         // Scan new/changed files with MMR
@@ -1058,11 +1071,43 @@ public class MainActivity extends AppCompatActivity
                 try { bitrate = Integer.parseInt(bitrateStr) / 1000; } catch (NumberFormatException ignored) {}
             }
 
-            // Sample rate, bit depth, channels -- not available from MMR on all API levels.
-            // These will be populated from AudioEngine during playback if needed.
+            // Probe sample rate, bit depth, channels via MediaExtractor
             int sampleRateVal = 0;
             int bitDepthVal = 0;
             int channelsVal = 0;
+            MediaExtractor extractor = new MediaExtractor();
+            try {
+                extractor.setDataSource(file.getAbsolutePath());
+                for (int i = 0; i < extractor.getTrackCount(); i++) {
+                    MediaFormat fmt = extractor.getTrackFormat(i);
+                    String mime = fmt.getString(MediaFormat.KEY_MIME);
+                    if (mime != null && mime.startsWith("audio/")) {
+                        if (fmt.containsKey(MediaFormat.KEY_SAMPLE_RATE)) {
+                            sampleRateVal = fmt.getInteger(MediaFormat.KEY_SAMPLE_RATE);
+                        }
+                        if (fmt.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) {
+                            channelsVal = fmt.getInteger(MediaFormat.KEY_CHANNEL_COUNT);
+                        }
+                        if (fmt.containsKey("pcm-encoding")) {
+                            int encoding = fmt.getInteger("pcm-encoding");
+                            // AudioFormat: ENCODING_PCM_16BIT=2, ENCODING_PCM_24BIT_PACKED=21,
+                            // ENCODING_PCM_32BIT=22, ENCODING_PCM_FLOAT=4
+                            switch (encoding) {
+                                case 2:  bitDepthVal = 16; break;
+                                case 21: bitDepthVal = 24; break;
+                                case 22: bitDepthVal = 32; break;
+                                case 4:  bitDepthVal = 32; break;
+                                default: break;
+                            }
+                        }
+                        break; // first audio track is enough
+                    }
+                }
+            } catch (Exception ignored) {
+                // MediaExtractor may fail on some formats; leave values at 0
+            } finally {
+                extractor.release();
+            }
 
             // Derive format from file extension
             String fileName = file.getName().toLowerCase(Locale.ROOT);
@@ -1070,11 +1115,17 @@ public class MainActivity extends AppCompatActivity
             String format = dot >= 0 ? fileName.substring(dot + 1).toUpperCase(Locale.ROOT) : null;
 
             long id = (long) file.getAbsolutePath().hashCode();
-            long albumId = (long) (album + artist).hashCode();
             Uri uri = Uri.fromFile(file);
 
             String folderPath = parent != null ? parent.getAbsolutePath() : "";
             String folderName = parent != null ? parent.getName() : "Unknown";
+
+            String albumGroupFolder = folderPath;
+            if (folderName.toLowerCase(Locale.ROOT).matches("^(cd|disc)[\\s-]*\\d+$") && parent != null && parent.getParentFile() != null) {
+                albumGroupFolder = parent.getParentFile().getAbsolutePath();
+            }
+
+            long albumId = (long) (album + artist + albumGroupFolder).hashCode();
 
             return new Track(id, title, artist, duration, uri,
                     album, albumId, trackNumber, discNumber, year,
@@ -1137,10 +1188,16 @@ public class MainActivity extends AppCompatActivity
             String format = isDsf ? "DSF" : "DFF";
 
             long id = (long) file.getAbsolutePath().hashCode();
-            long albumId = (long) (album + artist).hashCode();
             Uri uri = Uri.fromFile(file);
             String folderPath = parent != null ? parent.getAbsolutePath() : "";
             String folderName = parent != null ? parent.getName() : "Unknown";
+
+            String albumGroupFolder = folderPath;
+            if (folderName.toLowerCase(Locale.ROOT).matches("^(cd|disc)[\\s-]*\\d+$") && parent != null && parent.getParentFile() != null) {
+                albumGroupFolder = parent.getParentFile().getAbsolutePath();
+            }
+
+            long albumId = (long) (album + artist + albumGroupFolder).hashCode();
 
             return new Track(id, title, artist, durationMs, uri,
                     album, albumId, trackNumber, 1, 0,

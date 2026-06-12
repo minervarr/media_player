@@ -37,7 +37,9 @@ public class AlbumDao {
             // Aggregate per album_id
             Cursor c = db.rawQuery(
                     "SELECT album_id, album, artist, COUNT(*) AS cnt, SUM(duration_ms) AS total_dur,"
-                    + " MAX(year) AS max_year, genre, source, tidal_album_id, tidal_quality"
+                    + " MAX(year) AS max_year, genre, source, tidal_album_id, tidal_quality,"
+                    + " AVG(CASE WHEN sample_rate > 0 THEN sample_rate ELSE NULL END) AS avg_sr,"
+                    + " MAX(CASE WHEN UPPER(format) IN ('DSF','DFF') OR UPPER(format) LIKE 'DS%' THEN 1 ELSE 0 END) AS has_dsd"
                     + " FROM tracks GROUP BY album_id", null);
             try {
                 while (c.moveToNext()) {
@@ -51,6 +53,8 @@ public class AlbumDao {
                     int source = c.getInt(7);
                     Integer tidalAlbumId = c.isNull(8) ? null : c.getInt(8);
                     String tidalQuality = c.getString(9);
+                    int avgSampleRate = c.isNull(10) ? 0 : (int) c.getDouble(10);
+                    int hasDsd = c.getInt(11);
 
                     int releaseType = classifyRelease(db, albumId, name, trackCount);
 
@@ -67,6 +71,8 @@ public class AlbumDao {
                     cv.put("source", source);
                     if (tidalAlbumId != null) cv.put("tidal_album_id", tidalAlbumId);
                     cv.put("tidal_quality", tidalQuality);
+                    cv.put("avg_sample_rate", avgSampleRate);
+                    cv.put("has_dsd", hasDsd);
                     cv.put("updated_at", System.currentTimeMillis());
 
                     db.insertWithOnConflict("albums", null, cv, SQLiteDatabase.CONFLICT_REPLACE);
@@ -196,6 +202,10 @@ public class AlbumDao {
         info.genre = c.getString(c.getColumnIndexOrThrow("genre"));
         info.artworkKey = c.getString(c.getColumnIndexOrThrow("artwork_key"));
         info.source = c.getInt(c.getColumnIndexOrThrow("source"));
+        int srIdx = c.getColumnIndex("avg_sample_rate");
+        info.avgSampleRate = srIdx >= 0 ? c.getInt(srIdx) : 0;
+        int dsdIdx = c.getColumnIndex("has_dsd");
+        info.hasDsd = dsdIdx >= 0 && c.getInt(dsdIdx) != 0;
         return info;
     }
 
@@ -211,5 +221,9 @@ public class AlbumDao {
         public String genre;
         public String artworkKey;
         public int source;
+        /** Weighted-average sample rate (Hz) across all tracks in this album. */
+        public int avgSampleRate;
+        /** True if any track in this album is DSD format. */
+        public boolean hasDsd;
     }
 }

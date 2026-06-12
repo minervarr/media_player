@@ -100,15 +100,3 @@ target_link_libraries(${CMAKE_PROJECT_NAME}
     android
     jnigraphics
     log)
-
-# ── Qobuz Rust FFI ───────────────────────────────────────────────────────────
-
-add_library(qobuz_jni SHARED qobuz_jni_bridge.cpp)
-
-target_link_directories(qobuz_jni PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/../jniLibs/${ANDROID_ABI})
-
-target_link_libraries(qobuz_jni
-    android
-    log
-    qobuz_ffi)

@@ -116,7 +116,7 @@ public class GroupedFragment extends Fragment implements PlaybackObserver, Track
         categoryAdapter = new CategoryAdapter(categories, this, viewType);
         recyclerCategories.setAdapter(categoryAdapter);
 
-        detailTrackAdapter = new TrackAdapter(detailTracks, this);
+        detailTrackAdapter = new TrackAdapter(detailTracks, this, false);
         recyclerDetailTracks.setLayoutManager(new LinearLayoutManager(requireContext()));
         recyclerDetailTracks.setAdapter(detailTrackAdapter);
 
@@ -222,7 +222,24 @@ public class GroupedFragment extends Fragment implements PlaybackObserver, Track
                     subtitle = "";
                     artworkKey = null;
             }
-            items.add(new CategoryItem(key, title, subtitle, tracks.size(), artworkKey));
+            // Compute average sample rate and DSD flag across all tracks
+            long srSum = 0;
+            int srCount = 0;
+            boolean hasDsd = false;
+            for (Track t : tracks) {
+                if (t.sampleRate > 0) {
+                    srSum += t.sampleRate;
+                    srCount++;
+                }
+                if (t.format != null) {
+                    String fmt = t.format.toUpperCase();
+                    if (fmt.equals("DSF") || fmt.equals("DFF") || fmt.startsWith("DS")) {
+                        hasDsd = true;
+                    }
+                }
+            }
+            int avgSampleRate = srCount > 0 ? (int) (srSum / srCount) : 0;
+            items.add(new CategoryItem(key, title, subtitle, tracks.size(), artworkKey, avgSampleRate, hasDsd));
         }
         Collections.sort(items, (a, b) -> a.title.compareToIgnoreCase(b.title));
         categories.addAll(items);
@@ -306,18 +323,56 @@ public class GroupedFragment extends Fragment implements PlaybackObserver, Track
     public void onCategoryClick(CategoryItem item) {
         List<Track> tracks = groupedTracks.get(item.key);
         if (tracks == null) return;
-        showDetail(item.title, tracks);
+        showDetail(item, tracks);
     }
 
-    private void showDetail(String title, List<Track> tracks) {
+    private void showDetail(CategoryItem item, List<Track> tracks) {
         Fade fade = new Fade();
         fade.setDuration(150);
         fade.setInterpolator(new FastOutSlowInInterpolator());
         TransitionManager.beginDelayedTransition((ViewGroup) requireView(), fade);
 
-        tvDetailTitle.setText(title);
+        tvDetailTitle.setText(item.title);
+        
+        int unifiedStrokeColor = -1;
+        boolean isMixed = false;
+
+        for (Track track : tracks) {
+            int trackColor = android.graphics.Color.TRANSPARENT;
+            if (track.format != null && (track.format.equalsIgnoreCase("DSF") || track.format.equalsIgnoreCase("DFF") || track.format.toUpperCase().startsWith("DS"))) {
+                trackColor = android.graphics.Color.WHITE;
+            } else if (track.sampleRate >= 352800) {
+                trackColor = android.graphics.Color.parseColor("#FFA500");
+            } else if (track.sampleRate >= 64000) {
+                trackColor = android.graphics.Color.parseColor("#00FFFF");
+            } else if (track.sampleRate >= 44100) {
+                trackColor = android.graphics.Color.YELLOW;
+            }
+
+            if (unifiedStrokeColor == -1) {
+                unifiedStrokeColor = trackColor;
+            } else if (unifiedStrokeColor != trackColor) {
+                isMixed = true;
+                break;
+            }
+        }
+
+        View listContainer = requireView().findViewById(R.id.detail_list_container);
+        if (listContainer != null) {
+            android.graphics.drawable.GradientDrawable gd = new android.graphics.drawable.GradientDrawable();
+            gd.setColor(android.graphics.Color.TRANSPARENT);
+            gd.setCornerRadius(16f);
+            if (!isMixed && unifiedStrokeColor != -1 && unifiedStrokeColor != android.graphics.Color.TRANSPARENT) {
+                gd.setStroke(2, unifiedStrokeColor);
+            } else {
+                gd.setStroke(0, android.graphics.Color.TRANSPARENT);
+            }
+            listContainer.setBackground(gd);
+        }
+
         detailTracks.clear();
         detailTracks.addAll(tracks);
+        detailTrackAdapter.setShowQualityBorder(isMixed);
         detailTrackAdapter.notifyDataSetChanged();
         detailTrackAdapter.setPlayingTrackId(dataProvider.getPlayingTrackId());
 

@@ -66,6 +66,24 @@ public class CategoryAdapter extends RecyclerView.Adapter<CategoryAdapter.ViewHo
             }
             ArtworkCache.getInstance(holder.ivArtwork.getContext())
                     .loadArtwork(item.artworkKey, holder.ivArtwork, artworkSizePx);
+            
+            if (holder.ivArtwork instanceof com.google.android.material.imageview.ShapeableImageView) {
+                com.google.android.material.imageview.ShapeableImageView siv = (com.google.android.material.imageview.ShapeableImageView) holder.ivArtwork;
+                int strokeColor = android.graphics.Color.TRANSPARENT;
+                if (item.hasDsd) {
+                    strokeColor = android.graphics.Color.WHITE;
+                } else if (item.avgSampleRate >= 352800) {
+                    strokeColor = android.graphics.Color.parseColor("#FFA500");
+                } else if (item.avgSampleRate >= 64000) {
+                    strokeColor = android.graphics.Color.parseColor("#00FFFF");
+                } else if (item.avgSampleRate >= 44100) {
+                    strokeColor = android.graphics.Color.YELLOW;
+                }
+
+                float density = siv.getContext().getResources().getDisplayMetrics().density;
+                siv.setStrokeColor(android.content.res.ColorStateList.valueOf(strokeColor));
+                siv.setStrokeWidth(strokeColor == android.graphics.Color.TRANSPARENT ? 0 : 2.0f * density);
+            }
         } else if (holder.ivArtwork != null) {
             holder.ivArtwork.setVisibility(View.GONE);
         }

@@ -23,4 +23,5 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "matrix_player"
-include ':app', ':audioengine'
+include ':app', ':audioengine', ':kobuzapi'
+project(':kobuzapi').projectDir = new File(rootDir, 'kawusapi/kobuzapi')

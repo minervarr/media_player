@@ -48,11 +48,20 @@
 
         </LinearLayout>
 
-        <androidx.recyclerview.widget.RecyclerView
-            android:id="@+id/recycler_detail_tracks"
+        <FrameLayout
+            android:id="@+id/detail_list_container"
             android:layout_width="match_parent"
-            android:layout_height="match_parent" />
+            android:layout_height="match_parent"
+            android:layout_marginStart="8dp"
+            android:layout_marginEnd="8dp"
+            android:layout_marginBottom="8dp"
+            android:padding="2dp">
 
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/recycler_detail_tracks"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent" />
+        </FrameLayout>
     </LinearLayout>
 
     <TextView

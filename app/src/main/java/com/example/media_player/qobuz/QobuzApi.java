@@ -7,38 +7,26 @@ import org.json.JSONObject;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
- * REST client for the Qobuz API — uses Java HttpURLConnection directly.
+ * REST client for the Qobuz API — backed by the native KawusapiCC library.
  * All methods are synchronous -- call from background threads.
  */
 public class QobuzApi {
 
     private static final String TAG = "QobuzApi";
 
-    private final QobuzAuth auth;
+    private final QobuzClient client;
 
     public QobuzApi(QobuzAuth auth) {
-        this.auth = auth;
-    }
-
-    // ── HTTP helpers ─────────────────────────────────────────────────────────
-
-    private Map<String, String> authHeaders() {
-        Map<String, String> h = new HashMap<>();
-        h.put("X-App-Id", auth.getAppId());
-        String token = auth.getUserAuthToken();
-        if (token != null && !token.isEmpty()) h.put("X-User-Auth-Token", token);
-        return h;
+        this.client = auth.getClient();
     }
 
     private String apiGet(String endpoint, Map<String, String> params) throws Exception {
-        String url = auth.buildSignedUrl(endpoint, params);
-        return QobuzAuth.httpGet(url, authHeaders());
+        return client.apiGet(endpoint, params);
     }
 
     // ── Favorites ────────────────────────────────────────────────────────────
@@ -70,7 +58,7 @@ public class QobuzApi {
     public List<QobuzModels.QobuzPlaylist> getUserPlaylists() throws Exception {
         Map<String, String> p = new LinkedHashMap<>();
         p.put("limit", "500");
-        JSONObject json = new JSONObject(apiGet("/user/playlist/getUserPlaylists", p));
+        JSONObject json = new JSONObject(apiGet("/playlist/getUserPlaylists", p));
         JSONArray items = json.getJSONObject("playlists").getJSONArray("items");
         List<QobuzModels.QobuzPlaylist> result = new ArrayList<>();
         for (int i = 0; i < items.length(); i++) result.add(parseApiPlaylist(items.getJSONObject(i)));
@@ -80,9 +68,10 @@ public class QobuzApi {
     // ── Album / Playlist tracks ──────────────────────────────────────────────
 
     public List<QobuzModels.QobuzTrack> getAlbumTracks(String albumId) throws Exception {
+        // /album/get rejects extra=tracks on signed requests; tracks are
+        // included in the default response.
         Map<String, String> p = new LinkedHashMap<>();
         p.put("album_id", albumId);
-        p.put("extra", "tracks");
         JSONObject json = new JSONObject(apiGet("/album/get", p));
         String albumTitle = json.optString("title", "");
         String artist = optNestedString(json, "artist", "name", "");
@@ -123,11 +112,7 @@ public class QobuzApi {
     // ── Streaming ────────────────────────────────────────────────────────────
 
     public QobuzModels.StreamUrl getStreamUrl(long trackId, int formatId) throws Exception {
-        Map<String, String> p = new LinkedHashMap<>();
-        p.put("format_id", String.valueOf(formatId));
-        p.put("intent", "stream");
-        p.put("track_id", String.valueOf(trackId));
-        JSONObject json = new JSONObject(apiGet("/track/getFileUrl", p));
+        JSONObject json = new JSONObject(client.getTrackFileUrl(trackId, formatId));
         String url = json.optString("url", "");
         if (url.isEmpty()) throw new IOException("No stream URL returned for track " + trackId);
         return new QobuzModels.StreamUrl(

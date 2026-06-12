@@ -6,6 +6,7 @@ import android.view.ViewGroup;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
+import com.google.android.material.imageview.ShapeableImageView;
 
 import androidx.annotation.NonNull;
 import androidx.recyclerview.widget.RecyclerView;
@@ -20,11 +21,24 @@ public class TrackAdapter extends RecyclerView.Adapter<TrackAdapter.ViewHolder> 
 
     private final List<Track> tracks;
     private final OnTrackClickListener listener;
+    private boolean showQualityBorder;
     private long playingTrackId = -1;
 
     public TrackAdapter(List<Track> tracks, OnTrackClickListener listener) {
+        this(tracks, listener, true);
+    }
+
+    public TrackAdapter(List<Track> tracks, OnTrackClickListener listener, boolean showQualityBorder) {
         this.tracks = tracks;
         this.listener = listener;
+        this.showQualityBorder = showQualityBorder;
+    }
+
+    public void setShowQualityBorder(boolean showQualityBorder) {
+        if (this.showQualityBorder != showQualityBorder) {
+            this.showQualityBorder = showQualityBorder;
+            notifyDataSetChanged();
+        }
     }
 
     public void setPlayingTrackId(long trackId) {
@@ -90,6 +104,23 @@ public class TrackAdapter extends RecyclerView.Adapter<TrackAdapter.ViewHolder> 
         ArtworkCache.getInstance(holder.ivArtwork.getContext())
                 .loadArtwork(artworkKey, holder.ivArtwork, 120);
 
+        int strokeColor = android.graphics.Color.TRANSPARENT;
+        if (showQualityBorder) {
+            if (track.format != null && (track.format.equalsIgnoreCase("DSF") || track.format.equalsIgnoreCase("DFF") || track.format.toUpperCase().startsWith("DS"))) {
+                strokeColor = android.graphics.Color.WHITE;
+            } else if (track.sampleRate >= 352800) {
+                strokeColor = android.graphics.Color.parseColor("#FFA500");
+            } else if (track.sampleRate >= 64000) {
+                strokeColor = android.graphics.Color.parseColor("#00FFFF");
+            } else if (track.sampleRate >= 44100) {
+                strokeColor = android.graphics.Color.YELLOW;
+            }
+        }
+
+        float density = holder.itemView.getContext().getResources().getDisplayMetrics().density;
+        holder.ivArtwork.setStrokeColor(android.content.res.ColorStateList.valueOf(strokeColor));
+        holder.ivArtwork.setStrokeWidth(strokeColor == android.graphics.Color.TRANSPARENT ? 0 : 2.0f * density);
+
         holder.itemView.setOnClickListener(v -> {
             int pos = holder.getAdapterPosition();
             if (pos != RecyclerView.NO_POSITION && pos < tracks.size()) {
@@ -105,7 +136,7 @@ public class TrackAdapter extends RecyclerView.Adapter<TrackAdapter.ViewHolder> 
 
     static class ViewHolder extends RecyclerView.ViewHolder {
         final View playingIndicator;
-        final ImageView ivArtwork;
+        final ShapeableImageView ivArtwork;
         final TextView tvTrackNumber;
         final TextView tvTitle;
         final TextView tvArtist;

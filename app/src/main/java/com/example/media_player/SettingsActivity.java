@@ -208,7 +208,24 @@ public class SettingsActivity extends AppCompatActivity {
         }
     }
 
+    private static final int REQUEST_CODE_PICK_DIR = 1001;
+
     private void showAddFolderDialog() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+        intent.setPackage("io.nava.filex");
+        try {
+            startActivityForResult(intent, REQUEST_CODE_PICK_DIR);
+        } catch (android.content.ActivityNotFoundException e) {
+            intent.setPackage(null);
+            try {
+                startActivityForResult(intent, REQUEST_CODE_PICK_DIR);
+            } catch (Exception ex) {
+                showManualAddFolderDialog();
+            }
+        }
+    }
+
+    private void showManualAddFolderDialog() {
         EditText input = new EditText(this);
         input.setHint(R.string.setting_add_folder_hint);
         input.setTextColor(getColor(R.color.text_primary));
@@ -236,6 +253,29 @@ public class SettingsActivity extends AppCompatActivity {
                 })
                 .setNegativeButton(android.R.string.cancel, null)
                 .show();
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        if (requestCode == REQUEST_CODE_PICK_DIR && resultCode == RESULT_OK && data != null) {
+            android.net.Uri uri = data.getData();
+            if (uri != null) {
+                String path = com.example.media_player.util.UriUtils.getPathFromTreeUri(uri, this);
+                if (path != null) {
+                    File dir = new File(path);
+                    if (!dir.isDirectory()) {
+                        Toast.makeText(this, R.string.setting_folder_not_found, Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    folders.add(path);
+                    settings.setMusicFolders(folders);
+                    foldersChanged = true;
+                    refreshFolderList();
+                }
+            }
+        } else {
+            super.onActivityResult(requestCode, resultCode, data);
+        }
     }
 
     @Override
