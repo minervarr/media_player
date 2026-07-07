@@ -1125,7 +1125,8 @@ public class MainActivity extends AppCompatActivity
                 albumGroupFolder = parent.getParentFile().getAbsolutePath();
             }
 
-            long albumId = (long) (album + artist + albumGroupFolder).hashCode();
+            String groupingArtist = (albumArtist != null && !albumArtist.trim().isEmpty()) ? albumArtist.trim() : "";
+            long albumId = (long) (album + groupingArtist + albumGroupFolder).hashCode();
 
             return new Track(id, title, artist, duration, uri,
                     album, albumId, trackNumber, discNumber, year,
@@ -1197,7 +1198,7 @@ public class MainActivity extends AppCompatActivity
                 albumGroupFolder = parent.getParentFile().getAbsolutePath();
             }
 
-            long albumId = (long) (album + artist + albumGroupFolder).hashCode();
+            long albumId = (long) (album + "" + albumGroupFolder).hashCode();
 
             return new Track(id, title, artist, durationMs, uri,
                     album, albumId, trackNumber, 1, 0,

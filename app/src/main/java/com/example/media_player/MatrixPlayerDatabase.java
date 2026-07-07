@@ -9,7 +9,7 @@ public class MatrixPlayerDatabase extends SQLiteOpenHelper {
 
     private static final String TAG = "MatrixPlayerDB";
     private static final String DB_NAME = "matrix_player.db";
-    private static final int DB_VERSION = 6;
+    private static final int DB_VERSION = 7;
 
     private static volatile MatrixPlayerDatabase instance;
 
@@ -396,6 +396,9 @@ public class MatrixPlayerDatabase extends SQLiteOpenHelper {
         if (oldVersion < 6) {
             migrate_v5_to_v6(db);
         }
+        if (oldVersion < 7) {
+            migrate_v6_to_v7(db);
+        }
     }
 
     /**
@@ -541,6 +544,33 @@ public class MatrixPlayerDatabase extends SQLiteOpenHelper {
             db.execSQL("ALTER TABLE albums ADD COLUMN has_dsd INTEGER NOT NULL DEFAULT 0");
         } catch (Exception e) {
             Log.w(TAG, "has_dsd column may already exist: " + e.getMessage());
+        }
+        db.execSQL("DELETE FROM albums"); // Will be rebuilt by AlbumDao.rebuildAlbums()
+    }
+
+    private void migrate_v6_to_v7(SQLiteDatabase db) {
+        Log.d(TAG, "migrate_v6_to_v7: recalculating album_id for smarter album grouping");
+        try (android.database.Cursor c = db.rawQuery("SELECT id, album, artist, album_artist, folder_path, folder_name FROM tracks WHERE source = 0", null)) {
+            while (c.moveToNext()) {
+                long id = c.getLong(0);
+                String album = c.getString(1);
+                String artist = c.getString(2);
+                String albumArtist = c.getString(3);
+                String folderPath = c.getString(4);
+                String folderName = c.getString(5);
+
+                String albumGroupFolder = folderPath;
+                if (folderName != null && folderName.toLowerCase(java.util.Locale.ROOT).matches("^(cd|disc)[\\s-]*\\d+$")) {
+                    java.io.File parent = new java.io.File(folderPath);
+                    if (parent.getParentFile() != null) {
+                        albumGroupFolder = parent.getParentFile().getAbsolutePath();
+                    }
+                }
+
+                String groupingArtist = (albumArtist != null && !albumArtist.trim().isEmpty()) ? albumArtist.trim() : "";
+                long albumId = (long) (album + groupingArtist + albumGroupFolder).hashCode();
+                db.execSQL("UPDATE tracks SET album_id = ? WHERE id = ?", new Object[]{albumId, id});
+            }
         }
         db.execSQL("DELETE FROM albums"); // Will be rebuilt by AlbumDao.rebuildAlbums()
     }

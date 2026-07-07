@@ -1,6 +1,7 @@
 /* jconfigint.h -- generated manually for Android NDK builds of libjpeg-turbo 2.1.5.1 */
 
 #define BUILD  "20260322"
+#define HIDDEN __attribute__((visibility("hidden")))
 #undef inline
 #define INLINE  __attribute__((always_inline)) inline
 #define THREAD_LOCAL  __thread
